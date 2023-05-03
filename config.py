@@ -12,4 +12,4 @@ CONTRASTIVE_PRETRAINED_MODELS_DIR = '/path/where/to/save/models/'
 TRAINED_CLASSIFICATION_MODELS_DIR = '/path/where/to/save/models/'
 
 # specify where you want to save your results
-CSV_RESULTS_FILE = '/path/to/save/csv/file/'
+CSV_RESULTS_FILE = 'results/'
