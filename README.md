@@ -1,6 +1,8 @@
 # SP-EyeGAN: Generating Synthetic Eye Movement Data                               
 This repo provides the code for reproducing the experiments in SP-EyeGAN: Generating Synthetic Eye Movement Data.
 
+![Method overview](images/sp-eyegan.png)
+
 ## Reproduce the experiments
 
 ### Download data to extract fixations and saccades
