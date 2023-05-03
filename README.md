@@ -5,8 +5,11 @@ This repo provides the code for reproducing the experiments in SP-EyeGAN: Genera
 
 ## Reproduce the experiments
 
-### Download data to extract fixations and saccades
+### Download data
+Download the GazeBase data:
 * Download and extract the GazeBase data into a local directory to train FixGAN and SacGAN (https://figshare.com/articles/dataset/GazeBase_Data_Repository/12912257)
+Download the SB-SAT data:
+* Download the SB-SAT data into a local directory (https://osf.io/cdx69/)
 
 ### Configure the paths
 Modify `config.py` to contain the path to the GazeBase and SB-SAT directory and specify the folders, where you want to store the models and classification results.
