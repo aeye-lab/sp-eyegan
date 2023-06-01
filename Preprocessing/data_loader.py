@@ -5,6 +5,7 @@ import numpy as np
 import random
 import sys
 import pandas as pd
+import pymovements as pm
 from tqdm import tqdm
 import pickle
 from scipy import interpolate
@@ -44,20 +45,13 @@ rev_channels = {channels[a]:a for a in channels}
 
 # convert pixel to deg
 def pix2deg(pix, screenPX,screenCM,distanceCM, adjust_origin=True):
-    # Converts pixel screen coordinate to degrees of visual angle
-    # screenPX is the number of pixels that the monitor has in the horizontal
-    # axis (for x coord) or vertical axis (for y coord)
-    # screenCM is the width of the monitor in centimeters
-    # distanceCM is the distance of the monitor to the retina 
-    # pix: screen coordinate in pixels
-    # adjust origin: if origin (0,0) of screen coordinates is in the corner of the screen rather than in the center, set to True to center coordinates
-    pix=np.array(pix)
-    # center screen coordinates such that 0 is center of the screen:
-    if adjust_origin: 
-        pix = pix-(screenPX-1)/2 # pixel coordinates start with (0,0) 
-    # eye-to-screen-distance in pixels
-    distancePX = distanceCM*(screenPX/screenCM)
-    return np.arctan2(pix,distancePX) * 180/np.pi #  *180/pi wandelt bogenmass in grad
+    return pm.transforms.pix2deg(
+        arr=pix,
+        screen_px=screenPX,
+        screen_cm=screenCM,
+        distance_cm=distanceCM,
+        center_origin=adjust_origin,
+    )
 
 # convert pixel to deg
 def pix2deg_xy(data, screen_config = {'resolution':[1680,1050],
