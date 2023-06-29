@@ -49,3 +49,17 @@ Evaluate contrastively pre-trained models on SB-SAT downstream tasks via: `pytho
 
 ## Test model
 To see an example of how to create synthetic data run `generate_syn_data_for_reading.ipynb`
+
+### Citation
+If you are using SP-EyeGAN in your research, we would be happy if you cite our work by using the following BibTex entry:
+```bibtex
+@inproceedings{Prasse_SP-EyeGAN2023,
+  author    = {Paul Prasse and David R. Reich and Silvia Makowski and Shuwen Deng and Daniel Krakowczyk and Tobias Scheffer and Lena A. J{\"a}ger},
+  title     = {{SP-EyeGAN}: {G}enerating Synthetic Eye Movement Data with {G}enerative {A}dversarial {N}etworks},
+  booktitle = {Proceedings of the ACM Symposium on Eye-Tracking Research and Applications},
+  series    = {ETRA 2023},
+  year      = {2023},
+  publisher = {ACM},
+  doi       = {10.1145/3588015.3588410],
+}
+```
