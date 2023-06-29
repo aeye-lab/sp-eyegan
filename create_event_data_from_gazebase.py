@@ -64,7 +64,7 @@ def main():
     parser.add_argument('-target_sampling_rate', '--target_sampling_rate', type=int, default=1000)
     parser.add_argument('-sac_window_size', '--sac_window_size', type=int, default=30)
     parser.add_argument('-fix_window_size', '--fix_window_size', type=int, default=100)
-    parser.add_argument('-stimulus', '--stimulus', type=str, default='text')    # video | text | all
+    parser.add_argument('-stimulus', '--stimulus', type=str, default='text')    # video | text | all | fxs | hss | ran
     
     args = parser.parse_args()
     target_sampling_rate = args.target_sampling_rate
@@ -73,6 +73,12 @@ def main():
         use_trial_types = ['VD1','VD2']
     elif stimulus == 'text':
         use_trial_types = ['TEX']
+    elif stimulus == 'fxs':
+        use_trial_types = ['FXS']
+    elif stimulus == 'hss':
+        use_trial_types = ['HSS']
+    elif stimulus == 'ran':
+        use_trial_types = ['RAN']
     elif stimulus == 'all':
         use_trial_types = ['TEX','VD1','VD2','BLG','FXS','HSS','RAN']
     sac_window_size=args.sac_window_size

@@ -21,7 +21,7 @@ def main():
     parser.add_argument('-GPU','--GPU',type=int,default=0)
     parser.add_argument('-model_dir','--model_dir',type=str,default='event_model/')
     parser.add_argument('-event_type','--event_type',type=str,default='fixation')
-    parser.add_argument('-stimulus','--stimulus',type=str,default='video')
+    parser.add_argument('-stimulus','--stimulus',type=str,default='text')
     
     args = parser.parse_args()
     

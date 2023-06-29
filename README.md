@@ -19,11 +19,12 @@ Modify `config.py` to contain the path to the GazeBase and SB-SAT directory and 
 To train generative models to create fixations and saccades follow the next steps.
 
 #### 1. Create data to train FixGAN and SacGAN
-Create the data containing fixations and saccades extracted from GazeBase by running:
-* `python create_event_data_from_gazebase.py`
+Create the data containing fixations and saccades extracted from GazeBase (for the task of reading a text) by running:
+* `python create_event_data_from_gazebase.py --stimulus text`
+Fixations and saccades for the other stimuli could be extracted by change the stimulus (allowed stimili are {text, ran, hss, fxs, video, all}).
     
 #### 2. Train FixGAN/SacGAN
-Train GANs to create fixations and saccades:
+Train GANs to create fixations and saccades on previously created set of fixations and saccades:
 * Train FixGAN: `python train_event_model.py --event_type fixation`
 * Train SacGAN: `python train_event_model.py --event_type saccade`
 
