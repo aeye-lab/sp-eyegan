@@ -51,7 +51,9 @@ def main():
     parser.add_argument('-check_point_saver','--check_point_saver',type=int,default=100)
     parser.add_argument('-max_rotation','--max_rotation',type=float,default=6.)
     parser.add_argument('-stimulus','--stimulus',type=str,default='video') # video text original
-    parser.add_argument('-encoder_name','--encoder_name',type=str,default='ekyt') # video text original
+    parser.add_argument('-encoder_name','--encoder_name',type=str,default='ekyt')
+    parser.add_argument('-scanpath_model','--scanpath_model',type=str,default='random') # random|stat_model
+    parser.add_argument('-num_pretrain_instances','--num_pretrain_instances',type=int,default=-1)
     
     
     args = parser.parse_args()
@@ -71,33 +73,38 @@ def main():
     stimulus = args.stimulus
     max_rotation = args.max_rotation
     encoder_name = args.encoder_name
+    scanpath_model = args.scanpath_model
+    num_pretrain_instances = args.num_pretrain_instances
+    
     
     if encoder_name == 'clrgaze':
         embedding_size = 512
     elif encoder_name == 'ekyt':
         embedding_size = 128
-
+    
     if augmentation_mode == 'crop':
         contrastive_augmentation = {'window_size': window_size, 'overall_size': overall_size,'channels':channels, 'name':'crop'}
         model_save_path = model_dir + encoder_name + '_' + augmentation_mode + '_window_size_' + str(window_size) +\
                             '_overall_size_' + str(overall_size) +\
-                            '_embedding_size_' + str(embedding_size)
+                            '_embedding_size_' + str(embedding_size) +\
+                            '_' + str(scanpath_model) + '_' + str(num_pretrain_instances)
         per_process_gpu_memory_fraction = 1.
     elif augmentation_mode == 'random':
         contrastive_augmentation = {'window_size': window_size, 'channels':channels, 'name':'random','sd':sd}
         model_save_path = model_dir + encoder_name + '_' + augmentation_mode + '_window_size_' + str(window_size) +\
                             '_sd_' + str(sd) + '_sd_factor_' + str(sd_factor) +\
-                            '_embedding_size_' + str(embedding_size)
+                            '_embedding_size_' + str(embedding_size) +\
+                            '_' + str(scanpath_model) + '_' + str(num_pretrain_instances)
         per_process_gpu_memory_fraction = 1.
     elif augmentation_mode == 'rotation':
         contrastive_augmentation = {'window_size': window_size, 'channels':channels, 'name':'rotation','max_rotation':max_rotation}
         model_save_path = model_dir + encoder_name + '_' + augmentation_mode + '_window_size_' + str(window_size) +\
                             '_max_rotation_' + str(max_rotation) +\
-                            '_embedding_size_' + str(embedding_size)
+                            '_embedding_size_' + str(embedding_size) +\
+                            '_' + str(scanpath_model) + '_' + str(num_pretrain_instances)
         per_process_gpu_memory_fraction = 1.
     
         
-    
     flag_train_on_gpu = True
     if flag_train_on_gpu:
         import tensorflow as tf
@@ -116,7 +123,10 @@ def main():
         
     # load data
     if stimulus != 'original':
-        syn_data = np.load(data_dir + 'synthetic_data_' + stimulus + '.npy')
+        syn_data = np.load(data_dir + 'synthetic_data_' + str(stimulus) + '_' + str(scanpath_model) + '.npy')
+        if num_pretrain_instances != -1:
+            random_ids = np.random.permutation(np.arange(syn_data.shape[0]))
+            syn_data = syn_data[random_ids[0:num_pretrain_instances]]
     else:
         output_length = 5000
         max_round = 9
@@ -125,7 +135,6 @@ def main():
                                 use_trial_types = use_trial_types,
                                 number_train = -1,
                                 max_round = max_round,
-                                gaze_base_dir = gaze_base_dir,
                                 output_length = output_length,
                                 only_all_rounds = False,
                                 )

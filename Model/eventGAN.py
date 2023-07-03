@@ -195,6 +195,69 @@ class dataGenerator():
         self.sac_model = eventGAN(self.model_config_saccade)
         self.sac_model.load_model(self.saccade_path)        
     
+    
+    def sample_scanpath_dataset_stat_model(self,
+                                           stat_model,
+                                           text_lists,
+                                           expt_txts,
+                                           num_sample_saccs = 1000,
+                                           dva_threshold = 0.1,
+                                           max_iter = 10,
+                                           num_scanpaths_per_text = 10,
+                                           num_samples = 100,
+                                           output_size = 5000,
+                                           store_dva_data = False,
+                                           ):
+        def dva_to_vel(vector):
+            vel = np.array(vector[1:]) - np.array(vector[0:-1])
+            vel = np.array([0] + list(vel))
+            return vel
+        
+        output_data     = np.zeros([num_samples,output_size,self.channels])
+        if store_dva_data:
+            output_data_dva = np.zeros([num_samples,output_size,self.channels])
+        else:
+            output_data_dva = None
+        max_number = int(np.ceil(num_samples / (len(text_lists) * num_scanpaths_per_text)))
+        num_added = 0
+        for ii in tqdm(np.arange(max_number)):
+            if num_added >= num_samples:
+                break
+            for d_i in range(len(text_lists)):
+                text_list = text_lists[d_i]
+                expt_txt = expt_txts[d_i]
+                x_locations, y_locations, x_dva, y_dva, fix_durations = stat_model.sample_postions_for_text(text_list,
+                                                                                                    expt_txt)
+                saccade_durations = None
+                x_locs, y_locs = self.sample_scanpath(
+                                        x_fix_locations = x_dva,
+                                        y_fix_locations = y_dva,
+                                        num_sample_saccs = num_sample_saccs,
+                                        dva_threshold = dva_threshold,
+                                        fixation_durations = fix_durations,
+                                        saccade_durations = saccade_durations,
+                                       )
+                
+                x_vels, y_vels = dva_to_vel(x_locs), dva_to_vel(y_locs)
+                min_id = 0
+                max_id = len(x_vels) - (output_size +1)
+                sample_start_ids = np.array(np.random.choice(np.arange(min_id,max_id,1),num_scanpaths_per_text), dtype=np.int32)
+                for start_id in sample_start_ids:
+                    output_data[num_added,:,0] = x_vels[start_id:start_id + output_size]
+                    output_data[num_added,:,1] = y_vels[start_id:start_id + output_size]
+                    if store_dva_data:
+                        output_data_dva[num_added,:,0] = x_locs[start_id:start_id + output_size]
+                        output_data_dva[num_added,:,1] = y_locs[start_id:start_id + output_size]
+                    num_added += 1
+                    if num_added >= num_samples:
+                        break
+                if num_added >= num_samples:
+                    break
+        return {'vel_data': output_data,
+                'dva_data': output_data_dva,
+               }
+    
+    
     def sample_scanpath(self,
                         x_fix_locations,
                         y_fix_locations,

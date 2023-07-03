@@ -45,7 +45,7 @@ Pretrain model with contrastive loss (`python pretrain_constastive_learning.py`)
 #### 3. Evaluate model on downstream tasks:
 Evaluate contrastively pre-trained models on SB-SAT downstream tasks via: `python evaluate_downstream_tasks.py`
 * You can specify a pre-trained model name via `--pretrained-model-name MODEL_NAME`
-* Data will be made available upon acceptance
+* data location: https://osf.io/cdx69/
 
 ## Test model
 To see an example of how to create synthetic data run `generate_syn_data_for_reading.ipynb`

@@ -15,18 +15,20 @@ import argparse
 import tensorflow
 import tensorflow as tf
 from Model import eventGAN as eventGAN
+from Model import stat_scanpath_model as stat_scanpath_model
 
 
 def main():
     parser = argparse.ArgumentParser()
     parser.add_argument('-GPU', '--GPU', type=int, default=0)
-    parser.add_argument('-num_samples', '--num_samples', type=int, default=10000)
+    parser.add_argument('-num_samples', '--num_samples', type=int, default=100000)
     parser.add_argument('-output_size', '--output_size', type=int, default=5000)
     parser.add_argument('-flag_train_on_gpu', '--flag_train_on_gpu', type=int, default=1)
     parser.add_argument('-data_dir', '--data_dir', type=str, default='data/')
     parser.add_argument('-stimulus', '--stimulus', type=str, default='text')
     parser.add_argument('-sac_window_size', '--sac_window_size', type=int, default=30)
     parser.add_argument('-fix_window_size', '--fix_window_size', type=int, default=100)
+    parser.add_argument('-scanpath_model', '--scanpath_model', type=str, default='random') # random|stat_model
 
     args = parser.parse_args()
     GPU = args.GPU
@@ -36,6 +38,14 @@ def main():
     stimulus = args.stimulus
     sac_window_size = args.sac_window_size
     fix_window_size = args.fix_window_size
+    scanpath_model = args.scanpath_model
+    
+    # params for stimulus
+    expt_txt = {  'px_x':1680,
+                  'px_y':1050,
+                  'max_dva_x': 30,
+                  'max_dva_y': 25
+                 }
     
     
     # params for NN
@@ -115,7 +125,6 @@ def main():
         flag_train_on_gpu = False
         
     # set up GPU
-    flag_train_on_gpu = True
     if flag_train_on_gpu:
         import tensorflow as tf
         # select graphic card
@@ -136,10 +145,52 @@ def main():
                                                model_config_saccade,
                                                )
     
-    syt_data = data_generator.sample_random_data(num_samples = num_samples,
-                                             output_size = output_size)
-    
-    np.save(data_dir + 'synthetic_data_' + str(stimulus),syt_data)
+    if scanpath_model == 'random':
+        syt_data = data_generator.sample_random_data(num_samples = num_samples,
+                                                 output_size = output_size)
+    elif scanpath_model == 'stat_model':
+        stat_model = stat_scanpath_model.satisticalScanPath()
+        # collect texts
+        data_dir = '/home/prasse/work/Projekte/AEye/aeye_synthetic_data/ocr_detection/images/'
+        text_data_csvs = []
+        file_list = os.listdir(data_dir)
+        text_lists = []
+        for ii in range(len(file_list)):
+            if file_list[ii].endswith('.csv'):
+                ocr_data = pd.read_csv(data_dir + file_list[ii])
+                confs = np.array(ocr_data['conf'])
+                lefts = np.array(ocr_data['left'])
+                tops = np.array(ocr_data['top'])
+                widths = np.array(ocr_data['width'])
+                heights = np.array(ocr_data['height'])
+                words = np.array(ocr_data['text'])
+
+                text_list = []
+
+                for i in range(len(confs)):
+                    cur_conf = confs[i]
+                    if cur_conf != -1:        
+                        text_list.append((words[i],
+                                          lefts[i] + (widths[i]/2),
+                                        tops[i] + (heights[i]/2)))
+                text_lists.append(text_list)
+        expt_txts = [expt_txt for _ in range(len(text_lists))]
+        data_dict = data_generator.sample_scanpath_dataset_stat_model(
+                                           stat_model,
+                                           text_lists,
+                                           expt_txts,
+                                           num_sample_saccs = 250,
+                                           dva_threshold = 0.2,
+                                           max_iter = 10,
+                                           num_scanpaths_per_text = 10,
+                                           num_samples = num_samples,
+                                           output_size = output_size,
+                                           store_dva_data = False,
+                                          )
+        syt_data = data_dict['vel_data']
+        
+        
+    np.save(data_dir + 'synthetic_data_' + str(stimulus) + '_' + str(scanpath_model),syt_data)
     
     
 if __name__ == "__main__":
