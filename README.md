@@ -22,14 +22,20 @@ To train generative models to create fixations and saccades follow the next step
 Create the data containing fixations and saccades extracted from GazeBase (for the task of reading a text) by running:
 * `python create_event_data_from_gazebase.py --stimulus text`
 Fixations and saccades for the other stimuli could be extracted by change the stimulus (allowed stimili are {text, ran, hss, fxs, video, all}).
-    
-#### 2. Train FixGAN/SacGAN
-Train GANs to create fixations and saccades on previously created set of fixations and saccades:
-* Train FixGAN: `python train_event_model.py --event_type fixation`
-* Train SacGAN: `python train_event_model.py --event_type saccade`
 
-#### 3. Create synthetic data:
-Create synthetic data using the previously trained GANs:  `python create_synthetic_data.py`
+#### 3. Hyperparameter tuning for FixGAN/SacGAN
+Tune the hyperparameters for the FixGAN and SacGAN.
+* run sp-eyegan/hp_tuning_fixation.sh
+* run hp_tuning_saccade.sh
+Scripts above will run in an infite loop and try different hyperparameters. Results are written to the files results/saccade_hp.csv and results/fixation_hp.csv, respectively.
+    
+#### 3. Train FixGAN/SacGAN
+Train GANs to create fixations and saccades on previously created set of fixations and saccades:
+* Train FixGAN: `python train_event_model.py --event_type fixation --hp_result_path results/fixation_hp.csv`
+* Train SacGAN: `python train_event_model.py --event_type saccade --hp_result_path results/saccade_hp.csv`
+
+#### 4. Create synthetic data:
+Create synthetic data using the previously trained GANs:  `python create_synthetic_data.py --fix_hp_path results/fixation_hp.csv --sac_hp_path results/saccade_hp.csv`
     
 ### Apply model on downstream tasks:
 
@@ -42,8 +48,8 @@ Pretrain model with contrastive loss (`python pretrain_constastive_learning.py`)
 	* pretrain model with contrastive loss with random augmentation on original data: `python pretrain_constastive_learning.py -augmentation_mode random -stimulus original -sd 0.1 -sd_factor 1.25 -GPU 2`
 	* pretrain model with contrastive loss with rotation augmentation on original data: `python pretrain_constastive_learning.py -augmentation_mode rotation -stimulus original -max_rotation 6.0 -GPU 3`
 
-#### 3. Evaluate model on downstream tasks:
-Evaluate contrastively pre-trained models on SB-SAT downstream tasks via: `python evaluate_downstream_tasks.py`
+#### 2. Evaluate model on downstream tasks:
+Evaluate contrastively pre-trained models on SB-SAT downstream tasks via: `python evaluate_downstream_task_reading_comprehension.py`
 * You can specify a pre-trained model name via `--pretrained-model-name MODEL_NAME`
 * data location: https://osf.io/cdx69/
 

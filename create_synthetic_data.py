@@ -29,16 +29,21 @@ def main():
     parser.add_argument('-sac_window_size', '--sac_window_size', type=int, default=30)
     parser.add_argument('-fix_window_size', '--fix_window_size', type=int, default=100)
     parser.add_argument('-scanpath_model', '--scanpath_model', type=str, default='random') # random|stat_model
+    parser.add_argument('-fix_hp_path','--fix_hp_path',type=str,default=None)
+    parser.add_argument('-sac_hp_path','--sac_hp_path',type=str,default=None)
+    
 
     args = parser.parse_args()
-    GPU = args.GPU
-    data_dir = args.data_dir
-    num_samples = args.num_samples
-    output_size = args.output_size
-    stimulus = args.stimulus
+    GPU             = args.GPU
+    data_dir        = args.data_dir
+    num_samples     = args.num_samples
+    output_size     = args.output_size
+    stimulus        = args.stimulus
     sac_window_size = args.sac_window_size
     fix_window_size = args.fix_window_size
-    scanpath_model = args.scanpath_model
+    scanpath_model  = args.scanpath_model
+    fix_hp_path     = args.fix_hp_path
+    sac_hp_path     = args.sac_hp_path
     
     # params for stimulus
     expt_txt = {  'px_x':1680,
@@ -75,15 +80,30 @@ def main():
 
     mean_fix_len  = 250
     std_fix_len   = 225
-
-    
-    
     
     
     fixation_path  = 'event_model/fixation_model_' + stimulus
-    saccade_path   = 'event_model/saccade_model_' + stimulus 
+    saccade_path   = 'event_model/saccade_model_' + stimulus
     
-    model_config_fixation = {'gen_kernel_sizes':gen_kernel_sizes_fixation,
+    data_suffix = ''
+    
+    if fix_hp_path is not None:
+        fixation_path += '_optimized'
+        hp_result_data = pd.read_csv(fix_hp_path)
+        event_accs = list(hp_result_data['event_acc'])
+        model_names = list(hp_result_data['model_name'])
+        best_id = np.argmax(event_accs)
+        best_model_name = model_names[best_id]
+        
+        gen_kernel_sizes = [int(a) for a in np.array(best_model_name.split('_')[0].replace('[','').replace(']','').split(','))]
+        gen_filter_sizes = [int(a) for a in np.array(best_model_name.split('_')[1].replace('[','').replace(']','').split(','))]
+
+        dis_kernel_sizes = [int(a) for a in np.array(best_model_name.split('_')[2].replace('[','').replace(']','').split(','))]
+        dis_fiter_sizes = [int(a) for a in np.array(best_model_name.split('_')[3].replace('[','').replace(']','').split(','))]
+
+        dis_dropout = float(best_model_name.split('_')[4])
+        
+        model_config_fixation = {'gen_kernel_sizes':gen_kernel_sizes,
                     'gen_filter_sizes':gen_filter_sizes,
                     'dis_kernel_sizes':dis_kernel_sizes,
                     'dis_fiter_sizes':dis_fiter_sizes,
@@ -94,8 +114,36 @@ def main():
                     'random_size':random_size,
                     'relu_in_last':relu_in_last,
                    }
-    
-    model_config_saccade = {'gen_kernel_sizes':gen_kernel_sizes_saccade,
+        data_suffix = '_optimized'
+    else:
+        model_config_fixation = {'gen_kernel_sizes':gen_kernel_sizes_fixation,
+                    'gen_filter_sizes':gen_filter_sizes,
+                    'dis_kernel_sizes':dis_kernel_sizes,
+                    'dis_fiter_sizes':dis_fiter_sizes,
+                    'dis_dropout':dis_dropout,
+                    'window_size':fix_window_size,
+                    'channels':channels,
+                    'batch_size':batch_size,
+                    'random_size':random_size,
+                    'relu_in_last':relu_in_last,
+                   }
+    if sac_hp_path is not None:
+        saccade_path += '_optimized'
+        hp_result_data = pd.read_csv(sac_hp_path)
+        event_accs = list(hp_result_data['event_acc'])
+        model_names = list(hp_result_data['model_name'])
+        best_id = np.argmax(event_accs)
+        best_model_name = model_names[best_id]
+        
+        gen_kernel_sizes = [int(a) for a in np.array(best_model_name.split('_')[0].replace('[','').replace(']','').split(','))]
+        gen_filter_sizes = [int(a) for a in np.array(best_model_name.split('_')[1].replace('[','').replace(']','').split(','))]
+
+        dis_kernel_sizes = [int(a) for a in np.array(best_model_name.split('_')[2].replace('[','').replace(']','').split(','))]
+        dis_fiter_sizes = [int(a) for a in np.array(best_model_name.split('_')[3].replace('[','').replace(']','').split(','))]
+
+        dis_dropout = float(best_model_name.split('_')[4])
+        
+        model_config_saccade = {'gen_kernel_sizes':gen_kernel_sizes,
                     'gen_filter_sizes':gen_filter_sizes,
                     'dis_kernel_sizes':dis_kernel_sizes,
                     'dis_fiter_sizes':dis_fiter_sizes,
@@ -106,6 +154,20 @@ def main():
                     'random_size':random_size,
                     'relu_in_last':relu_in_last,
                    }
+        data_suffix = '_optimized'
+    else:
+        model_config_saccade = {'gen_kernel_sizes':gen_kernel_sizes_saccade,
+                    'gen_filter_sizes':gen_filter_sizes,
+                    'dis_kernel_sizes':dis_kernel_sizes,
+                    'dis_fiter_sizes':dis_fiter_sizes,
+                    'dis_dropout':dis_dropout,
+                    'window_size':sac_window_size,
+                    'channels':channels,
+                    'batch_size':batch_size,
+                    'random_size':random_size,
+                    'relu_in_last':relu_in_last,
+                   }
+    
     
     gan_config = {'window_size':window_size,
                   'random_size':random_size,
@@ -189,8 +251,10 @@ def main():
                                           )
         syt_data = data_dict['vel_data']
         
-        
-    np.save(data_dir + 'synthetic_data_' + str(stimulus) + '_' + str(scanpath_model),syt_data)
+    if output_size != 5000:
+        np.save(data_dir + 'synthetic_data_' + str(stimulus) + '_' + str(scanpath_model) + '_' + str(output_size) + data_suffix,syt_data)
+    else:
+        np.save(data_dir + 'synthetic_data_' + str(stimulus) + '_' + str(scanpath_model) + data_suffix,syt_data)
     
     
 if __name__ == "__main__":

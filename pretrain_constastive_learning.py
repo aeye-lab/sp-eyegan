@@ -54,6 +54,8 @@ def main():
     parser.add_argument('-encoder_name','--encoder_name',type=str,default='ekyt')
     parser.add_argument('-scanpath_model','--scanpath_model',type=str,default='random') # random|stat_model
     parser.add_argument('-num_pretrain_instances','--num_pretrain_instances',type=int,default=-1)
+    parser.add_argument('-flag_redo','--flag_redo',type=int,default=0)
+    
     
     
     args = parser.parse_args()
@@ -75,6 +77,7 @@ def main():
     encoder_name = args.encoder_name
     scanpath_model = args.scanpath_model
     num_pretrain_instances = args.num_pretrain_instances
+    flag_redo = args.flag_redo
     
     
     if encoder_name == 'clrgaze':
@@ -86,24 +89,29 @@ def main():
         contrastive_augmentation = {'window_size': window_size, 'overall_size': overall_size,'channels':channels, 'name':'crop'}
         model_save_path = model_dir + encoder_name + '_' + augmentation_mode + '_window_size_' + str(window_size) +\
                             '_overall_size_' + str(overall_size) +\
-                            '_embedding_size_' + str(embedding_size) +\
-                            '_' + str(scanpath_model) + '_' + str(num_pretrain_instances)
+                            '_embedding_size_' + str(embedding_size) + '_stimulus_' + str(stimulus) +\
+                            '_model_' + str(scanpath_model) + '_' + str(num_pretrain_instances)
         per_process_gpu_memory_fraction = 1.
     elif augmentation_mode == 'random':
         contrastive_augmentation = {'window_size': window_size, 'channels':channels, 'name':'random','sd':sd}
         model_save_path = model_dir + encoder_name + '_' + augmentation_mode + '_window_size_' + str(window_size) +\
                             '_sd_' + str(sd) + '_sd_factor_' + str(sd_factor) +\
-                            '_embedding_size_' + str(embedding_size) +\
-                            '_' + str(scanpath_model) + '_' + str(num_pretrain_instances)
+                            '_embedding_size_' + str(embedding_size) + '_stimulus_' + str(stimulus) +\
+                            '_model_' + str(scanpath_model) + '_' + str(num_pretrain_instances)
         per_process_gpu_memory_fraction = 1.
     elif augmentation_mode == 'rotation':
         contrastive_augmentation = {'window_size': window_size, 'channels':channels, 'name':'rotation','max_rotation':max_rotation}
         model_save_path = model_dir + encoder_name + '_' + augmentation_mode + '_window_size_' + str(window_size) +\
                             '_max_rotation_' + str(max_rotation) +\
-                            '_embedding_size_' + str(embedding_size) +\
-                            '_' + str(scanpath_model) + '_' + str(num_pretrain_instances)
+                            '_embedding_size_' + str(embedding_size) + '_stimulus_' + str(stimulus) +\
+                            '_model_' + str(scanpath_model) + '_' + str(num_pretrain_instances)
         per_process_gpu_memory_fraction = 1.
     
+    if not flag_redo and (os.path.exists(model_save_path) or os.path.exists(model_save_path + '.index')):
+        print('already exists')
+        return 0
+    
+    print('pretrain config: ' + str(contrastive_augmentation))
         
     flag_train_on_gpu = True
     if flag_train_on_gpu:
@@ -123,12 +131,17 @@ def main():
         
     # load data
     if stimulus != 'original':
-        syn_data = np.load(data_dir + 'synthetic_data_' + str(stimulus) + '_' + str(scanpath_model) + '.npy')
+        if window_size != 5000:
+            syn_data_path = data_dir + 'synthetic_data_' + str(stimulus) + '_' + str(scanpath_model) + '_' + str(output_size) + '.npy'
+        else:
+            syn_data_path = data_dir + 'synthetic_data_' + str(stimulus) + '_' + str(scanpath_model) + '.npy'            
+        
+        syn_data = np.load(syn_data_path)
         if num_pretrain_instances != -1:
             random_ids = np.random.permutation(np.arange(syn_data.shape[0]))
             syn_data = syn_data[random_ids[0:num_pretrain_instances]]
     else:
-        output_length = 5000
+        output_length = window_size
         max_round = 9
         use_trial_types = ['TEX']
         X_dict,Y,Y_columns = data_loader.load_gazebase_data(gaze_base_dir = config.gaze_base_dir,

@@ -13,3 +13,7 @@ TRAINED_CLASSIFICATION_MODELS_DIR = 'model/'#'/path/where/to/save/models/'
 
 # specify where you want to save your results
 CSV_RESULTS_FILE = 'results/'
+
+# GazeBase data dir (from pymovements)
+GAZE_BASE_DIR = '../../../eye2vec/data/GazeBase/'
+
