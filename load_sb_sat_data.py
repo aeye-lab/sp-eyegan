@@ -5,8 +5,10 @@ import os
 import numpy as np
 import polars as pl
 import tensorflow as tf
-from pymovements.transforms import pix2deg
-from pymovements.transforms import pos2vel
+from pymovements.gaze.transforms import pix2deg
+from pymovements.gaze.transforms import pos2vel
+from tqdm import tqdm
+
 
 import config
 
@@ -51,6 +53,7 @@ def get_samples(
                         screen_px=(1024, 768),
                         screen_cm=(44.5, 42.4),
                         distance_cm=70,
+                        origin='center',
                     )
                     vel_fix_arr = pos2vel(deg_fix_arr, sampling_rate=1000)
                     tmp_fix_arr = tmp_fix.to_numpy()
@@ -71,6 +74,7 @@ def get_samples(
                         screen_px=(768, 1024),
                         screen_cm=(42.4, 44.5),
                         distance_cm=70,
+                        origin='center',
                     )
                     vel_fix_arr = pos2vel(deg_fix_arr, sampling_rate=1000)
                     tmp_fix_arr = tmp_fix.to_numpy()
@@ -89,7 +93,13 @@ def get_samples(
     return arr, label_arr
 
 
-def get_sb_sat_data(window_in_ms: int) -> tuple[np.array, np.array, dict[str, int]]:
+def get_sb_sat_data(window_in_ms: int,
+                    verbose: int = 0) -> tuple[np.array, np.array, dict[str, int]]:
+    if verbose == 0:
+        disable = True
+    else:
+        disable = False
+        
     data_path = config.SB_SAT_DIR_PATH
     csv_dir_path = os.path.join(data_path, 'csvs')
 
@@ -102,10 +112,10 @@ def get_sb_sat_data(window_in_ms: int) -> tuple[np.array, np.array, dict[str, in
     }
     label_list = list(label_dict.keys())
     label_arr = np.empty((0, len(label_dict)))
-    for file_name in os.listdir(csv_dir_path):
+    for file_name in tqdm(os.listdir(csv_dir_path), disable = disable):
         subj = file_name.split('.')[0]
         reader_label_df = label_df.filter(pl.col('subj') == subj).select(label_list)
-        em_df = pl.read_csv(os.path.join(csv_dir_path, file_name), sep='\t')
+        em_df = pl.read_csv(os.path.join(csv_dir_path, file_name), separator='\t')
         arr, tmp_label_arr = get_samples(em_df, reader_label_df, window_in_ms)
         X_arr = np.vstack([X_arr, arr])
         label_arr = np.vstack([label_arr, tmp_label_arr])

@@ -41,6 +41,8 @@ def main():
     parser.add_argument('-sd','--sd',type=float,default=0.1)
     parser.add_argument('-sd_factor','--sd_factor',type=float,default=1.25)
     parser.add_argument('-window_size','--window_size',type=int,default=5000)
+    parser.add_argument('-orig_sampling_rate','--orig_sampling_rate',type=int,default=1000)
+    parser.add_argument('-target_sampling_rate','--target_sampling_rate',type=int,default=1000)
     parser.add_argument('-overall_size','--overall_size',type=int,default=5000)
     parser.add_argument('-channels','--channels',type=int,default=2)
     parser.add_argument('-batch_size','--batch_size',type=int,default=32)
@@ -55,6 +57,7 @@ def main():
     parser.add_argument('-scanpath_model','--scanpath_model',type=str,default='random') # random|stat_model
     parser.add_argument('-num_pretrain_instances','--num_pretrain_instances',type=int,default=-1)
     parser.add_argument('-flag_redo','--flag_redo',type=int,default=0)
+    parser.add_argument('-data_suffix','--data_suffix',type=str,default='')
     
     
     
@@ -78,6 +81,12 @@ def main():
     scanpath_model = args.scanpath_model
     num_pretrain_instances = args.num_pretrain_instances
     flag_redo = args.flag_redo
+    data_suffix = args.data_suffix
+    orig_sampling_rate = args.orig_sampling_rate
+    target_sampling_rate = args.target_sampling_rate
+    
+    model_window_size = int(window_size / (orig_sampling_rate / target_sampling_rate))
+    skip_rate = int(orig_sampling_rate / target_sampling_rate)
     
     
     if encoder_name == 'clrgaze':
@@ -86,26 +95,28 @@ def main():
         embedding_size = 128
     
     if augmentation_mode == 'crop':
-        contrastive_augmentation = {'window_size': window_size, 'overall_size': overall_size,'channels':channels, 'name':'crop'}
-        model_save_path = model_dir + encoder_name + '_' + augmentation_mode + '_window_size_' + str(window_size) +\
+        contrastive_augmentation = {'window_size': model_window_size, 'overall_size': overall_size,'channels':channels, 'name':'crop'}
+        model_save_path = model_dir + encoder_name + '_' + augmentation_mode + '_window_size_' + str(model_window_size) +\
                             '_overall_size_' + str(overall_size) +\
                             '_embedding_size_' + str(embedding_size) + '_stimulus_' + str(stimulus) +\
                             '_model_' + str(scanpath_model) + '_' + str(num_pretrain_instances)
         per_process_gpu_memory_fraction = 1.
     elif augmentation_mode == 'random':
-        contrastive_augmentation = {'window_size': window_size, 'channels':channels, 'name':'random','sd':sd}
-        model_save_path = model_dir + encoder_name + '_' + augmentation_mode + '_window_size_' + str(window_size) +\
+        contrastive_augmentation = {'window_size': model_window_size, 'channels':channels, 'name':'random','sd':sd}
+        model_save_path = model_dir + encoder_name + '_' + augmentation_mode + '_window_size_' + str(model_window_size) +\
                             '_sd_' + str(sd) + '_sd_factor_' + str(sd_factor) +\
                             '_embedding_size_' + str(embedding_size) + '_stimulus_' + str(stimulus) +\
                             '_model_' + str(scanpath_model) + '_' + str(num_pretrain_instances)
         per_process_gpu_memory_fraction = 1.
     elif augmentation_mode == 'rotation':
-        contrastive_augmentation = {'window_size': window_size, 'channels':channels, 'name':'rotation','max_rotation':max_rotation}
-        model_save_path = model_dir + encoder_name + '_' + augmentation_mode + '_window_size_' + str(window_size) +\
+        contrastive_augmentation = {'window_size': model_window_size, 'channels':channels, 'name':'rotation','max_rotation':max_rotation}
+        model_save_path = model_dir + encoder_name + '_' + augmentation_mode + '_window_size_' + str(model_window_size) +\
                             '_max_rotation_' + str(max_rotation) +\
                             '_embedding_size_' + str(embedding_size) + '_stimulus_' + str(stimulus) +\
                             '_model_' + str(scanpath_model) + '_' + str(num_pretrain_instances)
         per_process_gpu_memory_fraction = 1.
+    
+    model_save_path += data_suffix
     
     if not flag_redo and (os.path.exists(model_save_path) or os.path.exists(model_save_path + '.index')):
         print('already exists')
@@ -132,14 +143,17 @@ def main():
     # load data
     if stimulus != 'original':
         if window_size != 5000:
-            syn_data_path = data_dir + 'synthetic_data_' + str(stimulus) + '_' + str(scanpath_model) + '_' + str(output_size) + '.npy'
+            syn_data_path = data_dir + 'synthetic_data_' + str(stimulus) + '_' + str(scanpath_model) + '_' + str(output_size) + data_suffix + '.npy'
         else:
-            syn_data_path = data_dir + 'synthetic_data_' + str(stimulus) + '_' + str(scanpath_model) + '.npy'            
+            syn_data_path = data_dir + 'synthetic_data_' + str(stimulus) + '_' + str(scanpath_model) + data_suffix + '.npy'            
         
         syn_data = np.load(syn_data_path)
         if num_pretrain_instances != -1:
             random_ids = np.random.permutation(np.arange(syn_data.shape[0]))
             syn_data = syn_data[random_ids[0:num_pretrain_instances]]
+        if skip_rate != 1:
+            skips = np.arange(0,window_size,skip_rate)[0:model_window_size]
+            syn_data = syn_data[:,skips,:]
     else:
         output_length = window_size
         max_round = 9
@@ -154,6 +168,10 @@ def main():
         X_vel = X_dict.copy()['X_vel'] / 1000. # bring to range 0-1
         X_px = X_dict.copy()['X_px']
         syn_data = X_vel
+        
+        if skip_rate != 1:
+            skips = np.arange(0,window_size,skip_rate)[0:model_window_size]
+            syn_data = syn_data[:,skips,:]
     
     # create train data and train model
     if augmentation_mode != 'rotation':
@@ -172,7 +190,7 @@ def main():
                                                             embedding_size = embedding_size,
                                                             contrastive_augmentation = contrastive_augmentation,
                                                             channels = channels,
-                                                            window_size = window_size,
+                                                            window_size = model_window_size,
                                                             encoder_name = encoder_name)
     pretraining_model.compile(
         contrastive_optimizer=keras.optimizers.Adam(),
@@ -185,7 +203,7 @@ def main():
         used_iterations = 0
         for train_iter in range(iterations):
             if augmentation_mode == 'random':
-                contrastive_augmentation = {'window_size': window_size, 'channels':channels, 'name':'random','sd':sd}
+                contrastive_augmentation = {'window_size': model_window_size, 'channels':channels, 'name':'random','sd':sd}
                 sd = sd * sd_factor
                 pretraining_model.set_augmenter(contrastive_augmentation)
             cur_epochs = epochs_per_checkpoint

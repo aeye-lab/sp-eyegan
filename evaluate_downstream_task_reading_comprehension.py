@@ -95,6 +95,22 @@ def get_argument_parser() -> argparse.Namespace:
     parser.add_argument('--print-model-summary', action='store_true')
     parser.add_argument('--normalization', action='store_true')
     parser.add_argument('--models-batch', type=int)
+    
+    parser.add_argument('--pretrain_augmentation_mode', type=str, default=None)#'random')
+    parser.add_argument('--pretrain_stimulus', type=str, default='text')
+    parser.add_argument('--pretrain_encoder_name', type=str, default='ekyt')
+    parser.add_argument('--pretrain_scanpath_model', type=str, default='random')
+    parser.add_argument('--pretrain_sd', type=float, default=0.1)
+    parser.add_argument('--pretrain_sd_factor', type=float, default=1.25)
+    parser.add_argument('--pretrain_max_rotation', type=float, default=6.)
+    parser.add_argument('--pretrain_num_pretrain_instances', type=int, default=5000)
+    parser.add_argument('--pretrain_window_size', type=int, default=5000)
+    parser.add_argument('--pretrain_model_dir', type=str, default='pretrain_model/')
+    parser.add_argument('--pretrain_channels', type=int, default=2)
+    parser.add_argument('--pretrain_checkpoint', type=int, default=-1)
+    parser.add_argument('--pretrain_data_suffix', type=str, default='')
+    
+    
     parser.add_argument(
         '--problem-setting', type=str, default='native',
         choices=['acc', 'difficulty', 'subj_acc', 'native'],
@@ -112,37 +128,48 @@ def configure_gpu(args: argparse.Namespace) -> None:
     tf.compat.v1.Session(config=config)
 
 
+def save_model(model,
+               model_path,
+              ):    
+    model.save_weights(
+            model_path,
+        )
+
+def load_weights(model,
+                 model_path):
+    model.load_weights(
+        model_path,
+    )
+    return model
+
 def get_model(args: argparse.Namespace) -> Model:
     print(' === Loading model ===')
-
-    contrastive_augmentation = {
-        'window_size': args.window_size,
-        'channels': args.channels,
-        'name': 'random',
-        'sd': args.sd,
-    }
-
-    # load contrastive pretrained model
-    pretraining_model = contrastive_learner.ContrastiveModel(
-        temperature=args.temperature,
-        embedding_size=args.embedding_size,
-        contrastive_augmentation=contrastive_augmentation,
-        channels=args.channels,
-        window_size=args.window_size,
-        encoder_name=args.encoder_name,
-    )
-
-    if args.pretrained_model_name:
-        if args.base_model:
-            print('~=== Using Basemodel evaluation~')
-        else:
-            print(' === Using pretrained  model ===')
-            try:
-                pretraining_model.load_encoder_weights(args.pretrained_model_name)
-            except FileNotFoundError:
-                pretraining_model.load_encoder_weights(
-                    f"{args.model_dir}/{args.pretrained_model_name.split('.index')[0]}",
-                )
+    
+    if args.pretrain_model_path is None:        
+        contrastive_augmentation = {
+            'window_size': args.window_size,
+            'channels': args.channels,
+            'name': 'random',
+            'sd': args.sd,
+        }
+        
+        # load contrastive pretrained model
+        pretraining_model = contrastive_learner.ContrastiveModel(
+            temperature=args.temperature,
+            embedding_size=args.embedding_size,
+            contrastive_augmentation=contrastive_augmentation,
+            channels=args.channels,
+            window_size=args.window_size,
+            encoder_name=args.encoder_name,
+        )
+    else:
+        pretraining_model = contrastive_learner.ContrastiveModel(args.temperature,
+                                embedding_size=args.embedding_size,
+                                contrastive_augmentation=args.contrastive_augmentation,
+                                channels=args.channels,
+                                window_size=args.window_size,
+                                encoder_name=args.encoder_name,
+                                )
 
     dense_out = Dense(
         1, activation='sigmoid', name='dense_out',
@@ -151,6 +178,10 @@ def get_model(args: argparse.Namespace) -> Model:
                 inputs=pretraining_model.encoder.get_layer('velocity_input').input,
                 outputs=[dense_out], name='classifier',
     )
+    
+    if args.pretrain_model_path is not None:
+        print('load weights from: ' + str(args.pretrain_model_path))
+        classification_model = load_weights(classification_model, args.pretrain_model_path)
     if args.print_model_summary:
         classification_model.summary()
     return classification_model
@@ -158,7 +189,9 @@ def get_model(args: argparse.Namespace) -> Model:
 
 def four_problem_setting_eval_on_sb(args: argparse.Namespace) -> int:
     print(' === Loading data ===')
-    x_data, y_label, label_dict = get_sb_sat_data(args.window_size)
+    x_data, y_label, label_dict = get_sb_sat_data(args.window_size,
+                                  verbose = 1,
+                                  )
     if args.split_criterion == 'subj':
         split_criterion = np.array(sorted(list(set(y_label[:, label_dict[args.split_criterion]]))))
         n_splits = 5
@@ -325,38 +358,64 @@ def four_problem_setting_eval_on_sb(args: argparse.Namespace) -> int:
 
 
 def main() -> int:
-    args = get_argument_parser()
+    args = get_argument_parser()  
     print(' === Configuring GPU ===')
-
+    
     args.gpu = select_gpu(7700)
     print('~' * 79)
     print(f'{args.gpu=}')
     print('~' * 79)
-
+    
     configure_gpu(args)
     if args.EKYT:
         args.pretrained_model_name = None
+        args.pretrain_model_path = None
         four_problem_setting_eval_on_sb(args)
     elif args.CLRGaze:
         args.pretrained_model_name = None
+        args.pretrain_model_path = None
         four_problem_setting_eval_on_sb(args)
     else:
-        args.model_dir = config.CONTRASTIVE_PRETRAINED_MODELS_DIR
-        if args.pretrained_model_name:
-            if args.pretrained_model_name.startswith('clrgaze'):
-                args.encoder_name = 'CLRGaze'
+        if args.pretrain_augmentation_mode is None:
+            args.pretrain_model_path = None
+            if args.encoder_name == 'ekyt':
+                args.pretrained_model_name = 'ekyt_scratch'
+            elif args.encoder_name == 'clrgaze':
+                args.pretrained_model_name = 'cleargaze_scratch'
+            print(f'evaluating {args.encoder_name=}'.center(79, '~'))
+            four_problem_setting_eval_on_sb(args)            
+        else:
+            if args.pretrain_encoder_name == 'clrgaze':
                 args.embedding_size = 512
-            else:
-                args.encoder_name = 'EKYT'
+            elif args.pretrain_encoder_name == 'ekyt':
+                args.embedding_size = 128
+
+            if args.pretrain_augmentation_mode == 'crop':
+                args.contrastive_augmentation = {'window_size': args.pretrain_window_size, 'overall_size': args.overall_size,'channels':args.pretrain_channels, 'name':'crop'}
+                args.pretrain_model_path = args.pretrain_model_dir + args.pretrain_encoder_name + '_' + args.pretrain_augmentation_mode + '_window_size_' + str(args.pretrain_window_size) +\
+                                    '_overall_size_' + str(args.overall_size) +\
+                                    '_embedding_size_' + str(args.embedding_size) + '_stimulus_' + str(args.pretrain_stimulus) +\
+                                    '_model_' + str(args.pretrain_scanpath_model) + '_' + str(args.pretrain_num_pretrain_instances)
+                args.per_process_gpu_memory_fraction = 1.
+            elif args.pretrain_augmentation_mode == 'random':
+                args.contrastive_augmentation = {'window_size': args.pretrain_window_size, 'channels':args.pretrain_channels, 'name':'random','sd':args.pretrain_sd}
+                args.pretrain_model_path = args.pretrain_model_dir + args.pretrain_encoder_name + '_' + args.pretrain_augmentation_mode + '_window_size_' + str(args.pretrain_window_size) +\
+                                    '_sd_' + str(args.pretrain_sd) + '_sd_factor_' + str(args.pretrain_sd_factor) +\
+                                    '_embedding_size_' + str(args.embedding_size) + '_stimulus_' + str(args.pretrain_stimulus) +\
+                                    '_model_' + str(args.pretrain_scanpath_model) + '_' + str(args.pretrain_num_pretrain_instances)
+                args.per_process_gpu_memory_fraction = 1.
+            elif args.pretrain_augmentation_mode == 'rotation':
+                args.contrastive_augmentation = {'window_size': args.pretrain_window_size, 'channels':args.pretrain_channels, 'name':'rotation','max_rotation':args.pretrain_max_rotation}
+                args.pretrain_model_path = args.pretrain_model_dir + args.pretrain_encoder_name + '_' + args.pretrain_augmentation_mode + '_window_size_' + str(args.pretrain_window_size) +\
+                                    '_max_rotation_' + str(args.pretrain_max_rotation) +\
+                                    '_embedding_size_' + str(args.embedding_size) + '_stimulus_' + str(args.pretrain_stimulus) +\
+                                    '_model_' + str(args.pretrain_scanpath_model) + '_' + str(args.pretrain_num_pretrain_instances)
+            args.pretrain_model_path = args.pretrain_model_path + args.pretrain_data_suffix
+            args.pretrained_model_name = args.pretrain_model_path.split('/')[-1]
             print(f'evaluating {args.pretrained_model_name=}'.center(79, '~'))
             four_problem_setting_eval_on_sb(args)
-        else:
-            print(f'looking for all models in batch with idx {args.models_batch}'.center(79, '~'))
-            for idx, pretrained_model_name in enumerate(os.listdir(args.model_dir)):
-                if pretrained_model_name.endswith('.index'):
-                    if idx == args.models_batch:
-                        args.pretrained_model_name = pretrained_model_name
-                        four_problem_setting_eval_on_sb(args)
+            
+            
     return 0
 
 

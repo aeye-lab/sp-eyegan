@@ -55,7 +55,7 @@ def vel_to_dva(vel_data, x_start = 0,
     return np.concatenate([np.expand_dims(np.array(x_px),axis=1),
                            np.expand_dims(np.array(y_px),axis=1)],axis=1)
 
-def cut_gazebasedata(data,
+def cut_data(data,
                     max_vel = 0.5,
                     window = 5000,
                     verbose = 0,
@@ -63,11 +63,11 @@ def cut_gazebasedata(data,
     x_left = np.array(data['x_left_pos'], dtype=np.float32)
     y_left = np.array(data['y_left_pos'], dtype=np.float32)
     x_diff = x_left[1:-1] - x_left[:-2]
-    x_diff[x_diff > max_vel] = 0.5
-    x_diff[x_diff < -max_vel] = -0.5
+    x_diff[x_diff > max_vel] = max_vel
+    x_diff[x_diff < -max_vel] = -max_vel
     y_diff = y_left[1:-1] - y_left[:-2]
-    y_diff[y_diff > max_vel] = 0.5
-    y_diff[y_diff < -max_vel] = -0.5
+    y_diff[y_diff > max_vel] = max_vel
+    y_diff[y_diff < -max_vel] = -max_vel
 
     num_windows = int(np.floor(len(x_diff) / window))
     if verbose != 0:
@@ -602,7 +602,7 @@ def get_argument_parser() -> argparse.Namespace:
     # params
     parser = argparse.ArgumentParser()
     parser.add_argument('--stimulus', type=str, default='TEX')
-    parser.add_argument('--dataset', type=str, default='gazebase')
+    parser.add_argument('--dataset_name', type=str, default='gazebase')
     parser.add_argument('--encoder_name', type=str, default='ekyt')
     
     parser.add_argument('--pretrain_augmentation_mode', type=str, default=None)#'random')
@@ -617,6 +617,7 @@ def get_argument_parser() -> argparse.Namespace:
     parser.add_argument('--pretrain_model_dir', type=str, default='pretrain_model/')
     parser.add_argument('--pretrain_channels', type=int, default=2)
     parser.add_argument('--pretrain_checkpoint', type=int, default=-1)
+    parser.add_argument('--pretrain_data_suffix', type=str, default='')
     
     parser.add_argument('--result_dir', type=str, default='results/')
     parser.add_argument('--gpu', type=int, default=0)
@@ -625,6 +626,7 @@ def get_argument_parser() -> argparse.Namespace:
     parser.add_argument('--fold', type=int, default=0)
     parser.add_argument('--train_model', type=int, default=1)
     parser.add_argument('--flag_redo', type=int, default=0)
+    parser.add_argument('--max_rounds', type=int, default=-1)
     args = parser.parse_args()
     return args
 
@@ -634,7 +636,7 @@ def main() -> int:
     
     # get params
     stimulus = args.stimulus
-    dataset = args.dataset
+    dataset_name = args.dataset_name
     encoder_name = args.encoder_name
     result_dir = args.result_dir
     gpu = args.gpu
@@ -654,6 +656,8 @@ def main() -> int:
     pretrain_window_size = args.pretrain_window_size
     pretrain_channels = args.pretrain_channels
     pretrain_checkpoint = args.pretrain_checkpoint
+    pretrain_data_suffix = args.pretrain_data_suffix
+    max_rounds = args.max_rounds
     
     
     if pretrain_augmentation_mode is None:
@@ -686,18 +690,21 @@ def main() -> int:
                                 '_embedding_size_' + str(embedding_size) + '_stimulus_' + str(pretrain_stimulus) +\
                                 '_model_' + str(pretrain_scanpath_model) + '_' + str(pretrain_num_pretrain_instances)
         
-        model_path = pretrain_model_path
+        model_path = pretrain_model_path + pretrain_data_suffix
         if pretrain_checkpoint != -1:
             model_path = model_path + '_checkpoint_' + str(pretrain_checkpoint)
     
         if train_model == 1:
-            appendix = pretrain_augmentation_mode + '_pre-training'
+            appendix = pretrain_augmentation_mode + '_pre-training_num-pretrain-instances_' + str(pretrain_num_pretrain_instances) + pretrain_data_suffix
         else:
-            appendix = pretrain_augmentation_mode + '_zero-shot'
+            appendix = pretrain_augmentation_mode + '_zero-shot_num-pretrain-instances_' + str(pretrain_num_pretrain_instances) + pretrain_data_suffix
             
-    result_save_path = result_dir + encoder_name + '_fold' + str(fold) + '_' + appendix + '.joblib'
+    result_save_path = result_dir + encoder_name + '_fold' + str(fold) + '_' + appendix + '_dataset_' + str(dataset_name) + '.joblib'
     if pretrain_checkpoint != -1:
         result_save_path = result_save_path.replace('.joblib', '_checkpoint_' + str(pretrain_checkpoint) + '.joblib')
+    
+    if max_rounds != -1:
+        result_save_path = result_save_path.replace('.joblib','_max_rounds' + str(max_rounds) + '.joblib')
     
     if not flag_redo and os.path.exists(result_save_path):
         print('skip evaluation (already exists)')
@@ -716,22 +723,31 @@ def main() -> int:
     n_train_users = 0
     n_enrolled_users = -1
     n_impostors = 0
-    n_enrollment_sessions = 1
-    n_test_sessions = 1
     window_sizes = [1,2,12]
     
     configure_gpu(args)
     
-    if dataset == 'gazebase':
+    if dataset_name == 'gazebase':
         # load gazebase data
         dataset = pm.Dataset("GazeBase", path=config.GAZE_BASE_DIR)
+        
+        if max_rounds == -1:
+            subset = {
+                #'subject_id': list(np.arange(100,dtype=np.int32)),
+                'task_name': [stimulus],
+            }
+        else:
+            subset = {
+                #'subject_id': list(np.arange(100,dtype=np.int32)),
+                'task_name': [stimulus],
+                'round_id': list(np.arange(1,max_rounds+1,1)),
+            }
 
-        subset = {
-            #'subject_id': list(np.arange(100,dtype=np.int32)),
-            'task_name': [stimulus],
-        }
-
-        dataset.load(subset = subset)
+        try:
+            dataset.load()
+        except:
+            dataset.download()
+            dataset.load()
         
         
         num_pairs = len(dataset.gaze)
@@ -740,7 +756,7 @@ def main() -> int:
         session_ids = []
         for i in tqdm(np.arange(num_pairs)):
             cur_data = dataset.gaze[i].frame
-            cur_gazebase_data = cut_gazebasedata(cur_data,
+            cur_gazebase_data = cut_data(cur_data,
                                                 window=5000,
                                                 max_vel=.5,
                                                 )
@@ -794,6 +810,74 @@ def main() -> int:
         for train_idx, validation_idx in skf.split(orig_data, sub_transformed):
             break
     
+    elif dataset_name == 'judo':
+        dataset = pm.Dataset("JuDo1000", path=config.JUDO_BASE_DIR)
+        try:    
+            dataset.load()
+        except:
+            dataset.download()
+            dataset.load()
+        
+        # convert pixel data to degrees of visual angle
+        dataset.pix2deg()
+        
+        num_pairs = len(dataset.gaze)
+        session_ids = []
+        subject_ids = []
+        for i in tqdm(np.arange(num_pairs)):
+            cur_data = dataset.gaze[i].frame
+            cur_cut_data = cut_data(cur_data,
+                                                window=5000,
+                                                max_vel=.5,
+                                                )
+            if i == 0:
+                gaze_seq_data = cur_cut_data
+            else:
+                gaze_seq_data = np.concatenate([gaze_seq_data, cur_cut_data], axis=0)
+            subject_ids += [int(np.unique(cur_data['subject_id'])) for _ in range(cur_cut_data.shape[0])]
+            session_ids += [int(np.unique(cur_data['session_id'])) for _ in range(cur_cut_data.shape[0])]
+        
+        
+        unique_user = list(np.unique(subject_ids))
+        print('number of unique_users: ' + str(len(unique_user)))
+        np.random.seed(fold)
+        shuffled_user = np.random.permutation(unique_user)
+        train_user = shuffled_user[0:num_train_user]
+        test_user  = shuffled_user[num_train_user:]
+        train_ids  = np.where(np.isin(np.array(subject_ids), train_user))[0]
+        test_ids   = np.where(np.isin(np.array(subject_ids), test_user))[0]
+        print('number train instances: ' + str(len(train_ids)))
+        print('number test instances: ' + str(len(test_ids)))
+        
+        
+        train_subjects = np.array(subject_ids)[train_ids]
+        test_subjects  = np.array(subject_ids)[test_ids]
+        train_sessions = np.array(session_ids)[train_ids]
+        test_sessions  = np.array(session_ids)[test_ids]
+        train_data     = gaze_seq_data[train_ids]
+        test_data      = gaze_seq_data[test_ids]
+
+        # create training data
+        orig_data = train_data
+        orig_sub  = np.array(train_subjects, dtype=np.int32)
+
+        le = LabelEncoder()
+        sub_transformed = le.fit_transform(orig_sub)
+
+        n_train_users_f = len(np.unique(sub_transformed))
+        y_train = to_categorical(
+            sub_transformed, num_classes=n_train_users_f,
+        )
+
+        seq_len = orig_data.shape[1]
+        n_channels = orig_data.shape[2]
+        num_classes = y_train.shape[1]
+
+        from sklearn.model_selection import StratifiedKFold
+        skf = StratifiedKFold(n_splits=4, shuffle=True, random_state=42)
+        for train_idx, validation_idx in skf.split(orig_data, sub_transformed):
+            break
+        
     # get model
     biometric_model = get_biometric_model(encoder_name = encoder_name,
                                 model_path = model_path,
@@ -843,26 +927,46 @@ def main() -> int:
     if n_enrolled_users == -1:
         n_enrolled_users = len(np.unique(test_subjects))
     
-    score_dicts, label_dicts, person_one_dicts, person_two_dicts = get_scores_and_labels(
-        test_embeddings = embedding, 
-        test_user = np.array(test_subjects), #
-        test_sessions = np.array(test_sessions), # session
-        test_seqIds = np.array(test_rounds), # round
-        window_sizes = window_sizes,
-        n_train_users=n_train_users,
-        n_enrolled_users=n_enrolled_users,
-        n_impostors=n_impostors,
-        n_enrollment_sessions=n_enrollment_sessions,
-        n_test_sessions=n_test_sessions,
-        user_test_sessions=None,
-        enrollment_sessions=None,
-        verbose=1,
-        random_state=None,
-        seconds_per_session=None,
-        num_enrollment = 1,
-        )
-
-    # save to file
+    if dataset_name == 'gazebase':
+        score_dicts, label_dicts, person_one_dicts, person_two_dicts = get_scores_and_labels(
+            test_embeddings = embedding, 
+            test_user = np.array(test_subjects), #
+            test_sessions = np.array(test_sessions), # session
+            test_seqIds = np.array(test_rounds), # round
+            window_sizes = window_sizes,
+            n_train_users=n_train_users,
+            n_enrolled_users=n_enrolled_users,
+            n_impostors=n_impostors,
+            n_enrollment_sessions=1,
+            n_test_sessions=1,
+            user_test_sessions=None,
+            enrollment_sessions=None,
+            verbose=1,
+            random_state=fold,
+            seconds_per_session=None,
+            num_enrollment = 1,
+            )
+    elif dataset_name == 'judo':
+        score_dicts, label_dicts, person_one_dicts, person_two_dicts = get_scores_and_labels(
+            test_embeddings = embedding, 
+            test_user = np.array(test_subjects), #
+            test_sessions = np.array(test_sessions), # session
+            test_seqIds = None, # round
+            window_sizes = window_sizes,
+            n_train_users=n_train_users,
+            n_enrolled_users=n_enrolled_users,
+            n_impostors=n_impostors,
+            n_enrollment_sessions=3,
+            n_test_sessions=1,
+            user_test_sessions=None,
+            enrollment_sessions=None,
+            verbose=1,
+            random_state=fold,
+            seconds_per_session=None,
+            num_enrollment = 1,
+            )
+    
+    # save to files
     joblib.dump({'score_dicts':score_dicts,
                  'label_dicts':label_dicts,
                  'person_one_dicts':person_one_dicts,
@@ -870,6 +974,13 @@ def main() -> int:
                  'embeddings':embedding,
                  'test_subjects':test_subjects,
                  }, result_save_path, compress=3, protocol=2)
+    
+    for window_size in window_sizes:
+        joblib.dump({'scores':score_dicts[str(window_size)],
+                 'labels':label_dicts[str(window_size)],
+                 'person_one':person_one_dicts[str(window_size)],
+                 'person_two':person_two_dicts[str(window_size)],
+                 }, result_save_path.replace('.joblib','_window_size' + str(window_size) + '.joblib'), compress=3, protocol=2)
     
     return 0
 

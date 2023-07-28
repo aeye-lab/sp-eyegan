@@ -213,13 +213,13 @@ def main():
     elif scanpath_model == 'stat_model':
         stat_model = stat_scanpath_model.satisticalScanPath()
         # collect texts
-        data_dir = '/home/prasse/work/Projekte/AEye/aeye_synthetic_data/ocr_detection/images/'
+        image_data_dir = '/home/prasse/work/Projekte/AEye/aeye_synthetic_data/ocr_detection/images/'
         text_data_csvs = []
-        file_list = os.listdir(data_dir)
+        file_list = os.listdir(image_data_dir)
         text_lists = []
         for ii in range(len(file_list)):
             if file_list[ii].endswith('.csv'):
-                ocr_data = pd.read_csv(data_dir + file_list[ii])
+                ocr_data = pd.read_csv(image_data_dir + file_list[ii])
                 confs = np.array(ocr_data['conf'])
                 lefts = np.array(ocr_data['left'])
                 tops = np.array(ocr_data['top'])
@@ -250,12 +250,16 @@ def main():
                                            store_dva_data = False,
                                           )
         syt_data = data_dict['vel_data']
-        
-    if output_size != 5000:
-        np.save(data_dir + 'synthetic_data_' + str(stimulus) + '_' + str(scanpath_model) + '_' + str(output_size) + data_suffix,syt_data)
-    else:
-        np.save(data_dir + 'synthetic_data_' + str(stimulus) + '_' + str(scanpath_model) + data_suffix,syt_data)
     
+    print('save data')
+    if output_size != 5000:
+        data_save_path = data_dir + 'synthetic_data_' + str(stimulus) + '_' + str(scanpath_model) + '_' + str(output_size) + data_suffix
+        np.save(data_save_path, syt_data)
+    else:
+        data_save_path = data_dir + 'synthetic_data_' + str(stimulus) + '_' + str(scanpath_model) + data_suffix
+        np.save(data_save_path, syt_data)
+    
+    print('data saved to: ' + str(data_save_path))
     
 if __name__ == "__main__":
     # execute only if run as a script
