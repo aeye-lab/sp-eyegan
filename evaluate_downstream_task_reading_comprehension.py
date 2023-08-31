@@ -19,6 +19,9 @@ from gpu_selection import select_gpu
 from load_sb_sat_data import get_sb_sat_data
 from Model import contrastive_learner
 import config
+from sklearn.ensemble import RandomForestClassifier
+from sklearn.model_selection import GridSearchCV
+from scipy.spatial import distance
 
 
 def help_roc_auc(y_true, y_pred):
@@ -33,7 +36,7 @@ def auroc(y_true, y_pred):
 
 
 def get_auc_for_full_page(
-        model: Model,
+        predictions: np.array,
         x_arr: np.array | tf.Tensor,
         x_arr_screen_id: np.array | tf.Tensor,
         y_test: np.array | tf.Tensor,
@@ -60,7 +63,7 @@ def get_auc_for_full_page(
                 if sum(and_cond) == 0:
                     continue
                 else:
-                    mean_x_arr.append(np.mean(model.predict(x_arr[and_cond], verbose=False)))
+                    mean_x_arr.append(np.mean(predictions[and_cond]))
                     # all labels are conditioned on subj-book-page-combination,
                     # hence can take first
                     new_y_test.append(y_test[and_cond][0])
@@ -78,13 +81,11 @@ def get_argument_parser() -> argparse.Namespace:
     parser.add_argument('--window-size', type=int, default=5000)
     parser.add_argument('--overall-size', type=int, default=5000)
     parser.add_argument('--channels', type=int, default=2)
-    parser.add_argument('--EKYT', action='store_true')
-    parser.add_argument('--CLRGaze', action='store_true')
     parser.add_argument('--sd', type=float, default=0.1)
     parser.add_argument('--sd-factor', type=float, default=1.25)
     parser.add_argument('--batch-size', type=int, default=32)
     parser.add_argument('--check-point-saver', type=int, default=100)
-    parser.add_argument('--num-epochs', type=int, default=1000)
+    parser.add_argument('--num-epochs', type=int, default=100)
     parser.add_argument('--embedding-size', type=int, default=128)
     parser.add_argument('--temperature', type=float, default=0.1)
     parser.add_argument('--per-process-gpu-memory-fraction', type=float, default=.5)
@@ -109,6 +110,9 @@ def get_argument_parser() -> argparse.Namespace:
     parser.add_argument('--pretrain_channels', type=int, default=2)
     parser.add_argument('--pretrain_checkpoint', type=int, default=-1)
     parser.add_argument('--pretrain_data_suffix', type=str, default='')
+    parser.add_argument('--pretrain_model_path', type=str, default=None)
+    parser.add_argument('--inner_cv_loops', type=int, default=2)
+    parser.add_argument('--fine_tune', type=int, default=1)
     
     
     parser.add_argument(
@@ -198,6 +202,8 @@ def four_problem_setting_eval_on_sb(args: argparse.Namespace) -> int:
 
     problem_settings = ['native', 'difficulty', 'acc', 'subj_acc']
     results_dict = {}
+    results_distance = {}
+    results_rf = {}
     for problem_setting in problem_settings:
         print(f' Evaluation  on {problem_setting=} '.center(79, '='))
         problem_setting_mean = np.mean(y_label[:, label_dict[problem_setting]])
@@ -207,15 +213,15 @@ def four_problem_setting_eval_on_sb(args: argparse.Namespace) -> int:
         kfold = KFold(n_splits=n_splits)
         five_sec_eval_aucs = {}
         trained_aucs = {}
+        five_sec_eval_aucs_distance = {}
+        trained_aucs_distance = {}
+        five_sec_eval_aucs_rf = {}
+        trained_aucs_rf = {}
         np.random.seed(12)
         random.seed(12)
         tf.random.set_seed(12)
         if args.pretrained_model_name:
-            model_name = args.pretrained_model_name.split('/')[-1]
-        elif args.EKYT:
-            model_name = 'EKYT'
-        elif args.CLRGaze:
-            model_name = 'CLRGaze'
+            model_name = args.pretrained_model_name.split('/')[-1]        
         else:
             raise NotImplementedError
         for fold, (train_idx, test_idx) in enumerate(kfold.split(split_criterion)):
@@ -286,9 +292,52 @@ def four_problem_setting_eval_on_sb(args: argparse.Namespace) -> int:
 
             # train model
             model = get_model(args)
+            
+            # get feature extractions
+            embedding_model = Model(
+                inputs=model.input,
+                outputs=model.get_layer('dense').output,
+            )
+            
+            test_embedding = embedding_model.predict(
+                X_test,
+                batch_size=args.batch_size,
+            )
 
-            # zero-shot
-
+            train_embedding = embedding_model.predict(
+                X_train,
+                batch_size=args.batch_size,
+            )
+            
+            
+            print('evaluate zero-shot (distance based)')
+            pos_train_ids = np.where(y_train == 1)[0]
+            pos_mean = np.mean(train_embedding[pos_train_ids], axis=0)
+            
+            predictions_distances = distance.cdist(
+                test_embedding,
+                np.reshape(pos_mean, [1,len(pos_mean)]), metric='cosine',
+            )
+            
+            # rf with features
+            print('evaluate RF on features')
+            grid_search_verbosity = 1
+            param_grid = { 
+                'n_estimators': [500, 1000],
+                'max_features': ['sqrt', 'log2'],
+                'max_depth' : [2,4,8,16,32, None],
+                'criterion' :['entropy'],
+                'n_jobs': [-1]
+            }
+                
+            # rf
+            rf = GridSearchCV(estimator=RandomForestClassifier(), param_grid=param_grid, verbose = grid_search_verbosity, cv = args.inner_cv_loops)
+            rf.fit(train_embedding, y_train.ravel())
+            
+            best_parameters = rf.best_params_
+            predictions_rf = rf.predict_proba(test_embedding)
+            
+            
             optimizer = Adam(learning_rate=args.learning_rate)
             model.compile(
                 optimizer=optimizer,
@@ -316,13 +365,50 @@ def four_problem_setting_eval_on_sb(args: argparse.Namespace) -> int:
                 verbose=verbose,
                 batch_size=args.batch_size,
             )
-            print(np.unique(model.predict(X_test), return_counts=True))
-            five_sec_eval_auc = roc_auc_score(y_test_ps, model.predict(X_test))
+            predictions_nn = model.predict(X_test)
+            
+            #print(np.unique(model.predict(X_test), return_counts=True))
+            
+            # NN results
+            five_sec_eval_auc = roc_auc_score(y_test_ps, predictions_nn)
             five_sec_eval_aucs[fold] = five_sec_eval_auc
             trained_auc = get_auc_for_full_page(
-                model, X_test, X_test_screen_id, y_test_ps, y_test, N_test_split,
+                predictions_nn, X_test, X_test_screen_id, y_test_ps, y_test, N_test_split,
             )
-            trained_aucs[fold] = trained_auc
+            trained_aucs[fold] = trained_auc            
+            results_dict['model_name'] = model_name + '_fine-tune'
+            results_dict[f'{problem_setting}_auc_fold_{fold}'] = trained_auc
+            results_dict[f'{problem_setting}_five_sec_eval_auc_fold_{fold}'] = five_sec_eval_auc
+            results_dict[f'{problem_setting}_mean_auc'] = np.mean(list(trained_aucs.values()))
+            results_dict[f'{problem_setting}_five_sec_eval_mean_auc'] = np.mean(list(five_sec_eval_aucs.values()))
+            
+            # distance results
+            five_sec_eval_auc = roc_auc_score(y_test_ps, predictions_distances)
+            five_sec_eval_aucs_distance[fold] = five_sec_eval_auc
+            trained_auc = get_auc_for_full_page(
+                predictions_distances, X_test, X_test_screen_id, y_test_ps, y_test, N_test_split,
+            )
+            trained_aucs_distance[fold] = trained_auc            
+            results_distance['model_name'] = model_name + '_distance'
+            results_distance[f'{problem_setting}_auc_fold_{fold}'] = trained_auc
+            results_distance[f'{problem_setting}_five_sec_eval_auc_fold_{fold}'] = five_sec_eval_auc
+            results_distance[f'{problem_setting}_mean_auc'] = np.mean(list(trained_aucs_distance.values()))
+            results_distance[f'{problem_setting}_five_sec_eval_mean_auc'] = np.mean(list(five_sec_eval_aucs_distance.values()))
+            
+            # rf results
+            five_sec_eval_auc = roc_auc_score(y_test_ps, predictions_rf[:,1])
+            five_sec_eval_aucs_rf[fold] = five_sec_eval_auc
+            trained_auc = get_auc_for_full_page(
+                predictions_rf[:,1], X_test, X_test_screen_id, y_test_ps, y_test, N_test_split,
+            )
+            trained_aucs_rf[fold] = trained_auc            
+            results_rf['model_name'] = model_name + '_rf'
+            results_rf[f'{problem_setting}_auc_fold_{fold}'] = trained_auc
+            results_rf[f'{problem_setting}_five_sec_eval_auc_fold_{fold}'] = five_sec_eval_auc
+            results_rf[f'{problem_setting}_mean_auc'] = np.mean(list(trained_aucs_rf.values()))
+            results_rf[f'{problem_setting}_five_sec_eval_mean_auc'] = np.mean(list(five_sec_eval_aucs_rf.values()))
+            
+            '''
             print(f'{five_sec_eval_aucs.values()}')
             print(f'{trained_aucs.values()}')
             print(
@@ -335,23 +421,32 @@ def four_problem_setting_eval_on_sb(args: argparse.Namespace) -> int:
             )
             if args.base_model:
                 model_name = 'base_model_' + model_name
-            results_dict['model_name'] = model_name
-            results_dict[f'{problem_setting}_auc_fold_{fold}'] = trained_auc
-            results_dict[f'{problem_setting}_five_sec_eval_auc_fold_{fold}'] = five_sec_eval_auc
-            results_dict[f'{problem_setting}_mean_auc'] = np.mean(list(trained_aucs.values()))
-            results_dict[f'{problem_setting}_five_sec_eval_mean_auc'] = np.mean(list(five_sec_eval_aucs.values()))
-            model.save_weights(
-                config.TRAINED_CLASSIFICATION_MODELS_DIR,
-            )
+            '''
+            
+            #model.save_weights(
+            #    config.TRAINED_CLASSIFICATION_MODELS_DIR,
+            #)
 
     results_csv_path = config.CSV_RESULTS_FILE
-    results_csv = pd.read_csv(results_csv_path)
-    results_csv = pd.concat(
-        [
-            results_csv,
-            pd.DataFrame(results_dict, index=[0]),
-        ], ignore_index=True,
-    )
+    if os.path.exists(results_csv_path):
+        results_csv = pd.read_csv(results_csv_path)
+        results_csv = pd.concat(
+            [
+                results_csv,
+                pd.DataFrame(results_dict, index=[0]),
+                pd.DataFrame(results_distance, index=[0]),
+                pd.DataFrame(results_rf, index=[0]),
+            ], ignore_index=True,
+        )
+    else:
+        results_csv = pd.DataFrame(results_dict, index=[0])
+        results_csv = pd.concat(
+            [
+                results_csv,
+                pd.DataFrame(results_distance, index=[0]),
+                pd.DataFrame(results_rf, index=[0]),
+            ], ignore_index=True,
+        )
     results_csv.to_csv(results_csv_path, index=None)
 
     return 0
@@ -361,61 +456,45 @@ def main() -> int:
     args = get_argument_parser()  
     print(' === Configuring GPU ===')
     
-    args.gpu = select_gpu(7700)
+    if args.gpu == -1:
+        args.gpu = select_gpu(7700)
     print('~' * 79)
     print(f'{args.gpu=}')
     print('~' * 79)
     
     configure_gpu(args)
-    if args.EKYT:
-        args.pretrained_model_name = None
-        args.pretrain_model_path = None
-        four_problem_setting_eval_on_sb(args)
-    elif args.CLRGaze:
-        args.pretrained_model_name = None
-        args.pretrain_model_path = None
-        four_problem_setting_eval_on_sb(args)
-    else:
-        if args.pretrain_augmentation_mode is None:
-            args.pretrain_model_path = None
-            if args.encoder_name == 'ekyt':
-                args.pretrained_model_name = 'ekyt_scratch'
-            elif args.encoder_name == 'clrgaze':
-                args.pretrained_model_name = 'cleargaze_scratch'
-            print(f'evaluating {args.encoder_name=}'.center(79, '~'))
-            four_problem_setting_eval_on_sb(args)            
-        else:
-            if args.pretrain_encoder_name == 'clrgaze':
+    if args.pretrain_model_path is None:
+        if args.fine_tune != 0:
+            pretrain_model_dir = config.CONTRASTIVE_PRETRAINED_MODELS_DIR
+            if args.encoder_name == 'clrgaze':
                 args.embedding_size = 512
-            elif args.pretrain_encoder_name == 'ekyt':
+                args.pretrain_model_path = config.CONTRASTIVE_PRETRAINED_MODELS_DIR + 'clrgaze_random_window_size_5000_sd_0.1_sd_factor_1.25_embedding_size_512_stimulus_video_model_random_-1baseline_1000'
+            elif args.encoder_name == 'ekyt':
                 args.embedding_size = 128
-
-            if args.pretrain_augmentation_mode == 'crop':
-                args.contrastive_augmentation = {'window_size': args.pretrain_window_size, 'overall_size': args.overall_size,'channels':args.pretrain_channels, 'name':'crop'}
-                args.pretrain_model_path = args.pretrain_model_dir + args.pretrain_encoder_name + '_' + args.pretrain_augmentation_mode + '_window_size_' + str(args.pretrain_window_size) +\
-                                    '_overall_size_' + str(args.overall_size) +\
-                                    '_embedding_size_' + str(args.embedding_size) + '_stimulus_' + str(args.pretrain_stimulus) +\
-                                    '_model_' + str(args.pretrain_scanpath_model) + '_' + str(args.pretrain_num_pretrain_instances)
-                args.per_process_gpu_memory_fraction = 1.
-            elif args.pretrain_augmentation_mode == 'random':
-                args.contrastive_augmentation = {'window_size': args.pretrain_window_size, 'channels':args.pretrain_channels, 'name':'random','sd':args.pretrain_sd}
-                args.pretrain_model_path = args.pretrain_model_dir + args.pretrain_encoder_name + '_' + args.pretrain_augmentation_mode + '_window_size_' + str(args.pretrain_window_size) +\
-                                    '_sd_' + str(args.pretrain_sd) + '_sd_factor_' + str(args.pretrain_sd_factor) +\
-                                    '_embedding_size_' + str(args.embedding_size) + '_stimulus_' + str(args.pretrain_stimulus) +\
-                                    '_model_' + str(args.pretrain_scanpath_model) + '_' + str(args.pretrain_num_pretrain_instances)
-                args.per_process_gpu_memory_fraction = 1.
-            elif args.pretrain_augmentation_mode == 'rotation':
-                args.contrastive_augmentation = {'window_size': args.pretrain_window_size, 'channels':args.pretrain_channels, 'name':'rotation','max_rotation':args.pretrain_max_rotation}
-                args.pretrain_model_path = args.pretrain_model_dir + args.pretrain_encoder_name + '_' + args.pretrain_augmentation_mode + '_window_size_' + str(args.pretrain_window_size) +\
-                                    '_max_rotation_' + str(args.pretrain_max_rotation) +\
-                                    '_embedding_size_' + str(args.embedding_size) + '_stimulus_' + str(args.pretrain_stimulus) +\
-                                    '_model_' + str(args.pretrain_scanpath_model) + '_' + str(args.pretrain_num_pretrain_instances)
-            args.pretrain_model_path = args.pretrain_model_path + args.pretrain_data_suffix
-            args.pretrained_model_name = args.pretrain_model_path.split('/')[-1]
-            print(f'evaluating {args.pretrained_model_name=}'.center(79, '~'))
-            four_problem_setting_eval_on_sb(args)
+                args.pretrain_model_path = config.CONTRASTIVE_PRETRAINED_MODELS_DIR + 'ekyt_random_window_size_5000_sd_0.1_sd_factor_1.25_embedding_size_128_stimulus_video_model_random_-1baseline_1000'
+        else:
+            if args.encoder_name == 'clrgaze':
+                args.embedding_size = 512
+            elif args.encoder_name == 'ekyt':
+                args.embedding_size = 128
             
-            
+    else:
+        if args.encoder_name == 'clrgaze':
+            args.embedding_size = 512
+        elif args.encoder_name == 'ekyt':
+            args.embedding_size = 128
+    # create dummy augmentatoin
+    args.contrastive_augmentation = {'window_size': args.pretrain_window_size, 'channels':args.pretrain_channels, 'name':'random','sd':args.pretrain_sd}
+    if args.pretrain_model_path is not None:
+        args.pretrained_model_name = args.pretrain_model_path.split('/')[-1]
+    else:
+        if args.encoder_name == 'clrgaze':
+            args.pretrained_model_name = 'CLRGAZE'
+        elif args.encoder_name == 'ekyt':
+            args.pretrained_model_name = 'EKYT'
+        
+    print(f'evaluating {args.pretrained_model_name=}'.center(79, '~'))
+    four_problem_setting_eval_on_sb(args)
     return 0
 
 

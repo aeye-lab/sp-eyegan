@@ -36,6 +36,7 @@ from tensorflow.keras.utils import to_categorical
 from tensorflow.keras.models import Model
 from Preprocessing import data_loader as data_loader
 from Model import contrastive_learner as contrastive_learner
+from gpu_selection import select_gpu
 
 
 
@@ -618,21 +619,34 @@ def get_argument_parser() -> argparse.Namespace:
     parser.add_argument('--pretrain_channels', type=int, default=2)
     parser.add_argument('--pretrain_checkpoint', type=int, default=-1)
     parser.add_argument('--pretrain_data_suffix', type=str, default='')
+    parser.add_argument('--pretrain_model_path', type=str, default=None)
     
     parser.add_argument('--result_dir', type=str, default='results/')
-    parser.add_argument('--gpu', type=int, default=0)
+    parser.add_argument('--gpu', type=int, default=-1)
     parser.add_argument('--num_train_user', type=int, default=100)
-    parser.add_argument('--n_folds', type=int, default=10)
-    parser.add_argument('--fold', type=int, default=0)
-    parser.add_argument('--train_model', type=int, default=1)
+    parser.add_argument('--n_folds', type=int, default=5)
+    parser.add_argument('--fold', type=int, default=-1)
     parser.add_argument('--flag_redo', type=int, default=0)
-    parser.add_argument('--max_rounds', type=int, default=-1)
+    parser.add_argument('--max_rounds', type=int, default=4)
+    parser.add_argument('--batch_size', type=int, default=256)
+    parser.add_argument('--fine_tune', type=int, default=1)
     args = parser.parse_args()
     return args
 
 
+
+
 def main() -> int:
     args = get_argument_parser()
+    
+    print(' === Configuring GPU ===')
+    
+    if args.gpu == -1:
+        args.gpu = select_gpu(7700)
+    print('~' * 79)
+    print(f'{args.gpu=}')
+    print('~' * 79)
+    
     
     # get params
     stimulus = args.stimulus
@@ -642,8 +656,11 @@ def main() -> int:
     gpu = args.gpu
     num_train_user = args.num_train_user
     fold = args.fold
-    train_model = args.train_model    
     flag_redo = args.flag_redo
+    if flag_redo == 1:
+        flag_redo = True
+    else:
+        flag_redo = False
     pretrain_augmentation_mode = args.pretrain_augmentation_mode
     pretrain_stimulus = args.pretrain_stimulus
     pretrain_encoder_name = args.pretrain_encoder_name
@@ -660,235 +677,268 @@ def main() -> int:
     max_rounds = args.max_rounds
     
     
-    if pretrain_augmentation_mode is None:
-        appendix = 'scratch'
-        model_path = None
+    if fold == -1:
+        folds = list(np.arange(args.n_folds, dtype=np.int32))
     else:
-        if pretrain_encoder_name == 'clrgaze':
-            embedding_size = 512
-        elif pretrain_encoder_name == 'ekyt':
-            embedding_size = 128
-
-        if pretrain_augmentation_mode == 'crop':
-            contrastive_augmentation = {'window_size': pretrain_window_size, 'overall_size': overall_size,'channels':pretrain_channels, 'name':'crop'}
-            pretrain_model_path = pretrain_model_dir + pretrain_encoder_name + '_' + pretrain_augmentation_mode + '_window_size_' + str(pretrain_window_size) +\
-                                '_overall_size_' + str(overall_size) +\
-                                '_embedding_size_' + str(embedding_size) + '_stimulus_' + str(pretrain_stimulus) +\
-                                '_model_' + str(pretrain_scanpath_model) + '_' + str(pretrain_num_pretrain_instances)
-            per_process_gpu_memory_fraction = 1.
-        elif pretrain_augmentation_mode == 'random':
-            contrastive_augmentation = {'window_size': pretrain_window_size, 'channels':pretrain_channels, 'name':'random','sd':pretrain_sd}
-            pretrain_model_path = pretrain_model_dir + pretrain_encoder_name + '_' + pretrain_augmentation_mode + '_window_size_' + str(pretrain_window_size) +\
-                                '_sd_' + str(pretrain_sd) + '_sd_factor_' + str(pretrain_sd_factor) +\
-                                '_embedding_size_' + str(embedding_size) + '_stimulus_' + str(pretrain_stimulus) +\
-                                '_model_' + str(pretrain_scanpath_model) + '_' + str(pretrain_num_pretrain_instances)
-            per_process_gpu_memory_fraction = 1.
-        elif pretrain_augmentation_mode == 'rotation':
-            contrastive_augmentation = {'window_size': pretrain_window_size, 'channels':pretrain_channels, 'name':'rotation','max_rotation':pretrain_max_rotation}
-            pretrain_model_path = pretrain_model_dir + pretrain_encoder_name + '_' + pretrain_augmentation_mode + '_window_size_' + str(pretrain_window_size) +\
-                                '_max_rotation_' + str(pretrain_max_rotation) +\
-                                '_embedding_size_' + str(embedding_size) + '_stimulus_' + str(pretrain_stimulus) +\
-                                '_model_' + str(pretrain_scanpath_model) + '_' + str(pretrain_num_pretrain_instances)
-        
-        model_path = pretrain_model_path + pretrain_data_suffix
-        if pretrain_checkpoint != -1:
-            model_path = model_path + '_checkpoint_' + str(pretrain_checkpoint)
+        folds = [fold]
     
-        if train_model == 1:
-            appendix = pretrain_augmentation_mode + '_pre-training_num-pretrain-instances_' + str(pretrain_num_pretrain_instances) + pretrain_data_suffix
+    for cur_fold in folds:
+        args.fold = cur_fold
+    
+        if args.pretrain_model_path is None:
+            if args.fine_tune != 0:
+                pretrain_model_dir = config.CONTRASTIVE_PRETRAINED_MODELS_DIR
+                if args.encoder_name == 'clrgaze':
+                    args.embedding_size = 512
+                    args.pretrain_model_path = config.CONTRASTIVE_PRETRAINED_MODELS_DIR + 'clrgaze_random_window_size_5000_sd_0.1_sd_factor_1.25_embedding_size_512_stimulus_video_model_random_-1baseline_1000'
+                elif args.encoder_name == 'ekyt':
+                    args.embedding_size = 128
+                    args.pretrain_model_path = config.CONTRASTIVE_PRETRAINED_MODELS_DIR + 'ekyt_random_window_size_5000_sd_0.1_sd_factor_1.25_embedding_size_128_stimulus_video_model_random_-1baseline_1000'
+            else:
+                if args.encoder_name == 'clrgaze':
+                    args.embedding_size = 512
+                elif args.encoder_name == 'ekyt':
+                    args.embedding_size = 128
         else:
-            appendix = pretrain_augmentation_mode + '_zero-shot_num-pretrain-instances_' + str(pretrain_num_pretrain_instances) + pretrain_data_suffix
+            if args.encoder_name == 'clrgaze':
+                args.embedding_size = 512
+            elif args.encoder_name == 'ekyt':
+                args.embedding_size = 128
+                
+        model_path = args.pretrain_model_path
+        
+        # create dummy augmentation
+        args.contrastive_augmentation = {'window_size': args.pretrain_window_size, 'channels':args.pretrain_channels, 'name':'random','sd':args.pretrain_sd}
+        if args.pretrain_model_path is not None:
+            args.pretrained_model_name = args.pretrain_model_path.split('/')[-1]
+        else:
+            if args.encoder_name == 'clrgaze':
+                args.pretrained_model_name = 'CLRGAZE'
+            elif args.encoder_name == 'ekyt':
+                args.pretrained_model_name = 'EKYT'
+        result_save_path = result_dir + str(args.pretrained_model_name) + '_fold' + str(args.fold) + '_biometric_' + '_dataset_' + str(dataset_name) +\
+                            '.joblib'
+                            
+        if max_rounds != -1:
+            result_save_path = result_save_path.replace('.joblib','_max_rounds' + str(max_rounds) + '.joblib')
+        
+        result_save_path = result_save_path.replace('.joblib','_num_folds' + str(args.n_folds) + '.joblib')
+        
+        
+        if not flag_redo and os.path.exists(result_save_path):
+            print('skip evaluation (already exists)')
+            return 0
+        
+        
+        # params
+        loss_weight_ce = 0.1
+        loss_ms = 1.
+        learning_rate = 1e-2
+        batch_size = args.batch_size
+        epochs = 100
+        temperature = 0.1
+        
+        # biometric eval params
+        n_train_users = 0
+        n_enrolled_users = -1
+        n_impostors = 0
+        window_sizes = [1,2,12]
+        
+        configure_gpu(args)
+        
+        if dataset_name == 'gazebase':
+            # load gazebase data
+            dataset = pm.Dataset("GazeBase", path=config.GAZE_BASE_DIR)
             
-    result_save_path = result_dir + encoder_name + '_fold' + str(fold) + '_' + appendix + '_dataset_' + str(dataset_name) + '.joblib'
-    if pretrain_checkpoint != -1:
-        result_save_path = result_save_path.replace('.joblib', '_checkpoint_' + str(pretrain_checkpoint) + '.joblib')
-    
-    if max_rounds != -1:
-        result_save_path = result_save_path.replace('.joblib','_max_rounds' + str(max_rounds) + '.joblib')
-    
-    if not flag_redo and os.path.exists(result_save_path):
-        print('skip evaluation (already exists)')
-        return 0
-    
-    
-    # params
-    loss_weight_ce = 0.1
-    loss_ms = 1.
-    learning_rate = 1e-2
-    batch_size = 256
-    epochs = 100
-    temperature = 0.1
-    
-    # biometric eval params
-    n_train_users = 0
-    n_enrolled_users = -1
-    n_impostors = 0
-    window_sizes = [1,2,12]
-    
-    configure_gpu(args)
-    
-    if dataset_name == 'gazebase':
-        # load gazebase data
-        dataset = pm.Dataset("GazeBase", path=config.GAZE_BASE_DIR)
-        
-        if max_rounds == -1:
-            subset = {
-                #'subject_id': list(np.arange(100,dtype=np.int32)),
-                'task_name': [stimulus],
-            }
-        else:
-            subset = {
-                #'subject_id': list(np.arange(100,dtype=np.int32)),
-                'task_name': [stimulus],
-                'round_id': list(np.arange(1,max_rounds+1,1)),
-            }
-
-        try:
-            dataset.load()
-        except:
-            dataset.download()
-            dataset.load()
-        
-        
-        num_pairs = len(dataset.gaze)
-        round_ids   = []
-        subject_ids = []
-        session_ids = []
-        for i in tqdm(np.arange(num_pairs)):
-            cur_data = dataset.gaze[i].frame
-            cur_gazebase_data = cut_data(cur_data,
-                                                window=5000,
-                                                max_vel=.5,
-                                                )
-            if i == 0:
-                gaze_seq_data = cur_gazebase_data
+            if max_rounds == -1:
+                subset = {
+                    #'subject_id': list(np.arange(100,dtype=np.int32)),
+                    'task_name': [stimulus],
+                }
             else:
-                gaze_seq_data = np.concatenate([gaze_seq_data, cur_gazebase_data], axis=0)
-            round_ids += [int(np.unique(cur_data['round_id'])) for _ in range(cur_gazebase_data.shape[0])]
-            subject_ids += [int(np.unique(cur_data['subject_id'])) for _ in range(cur_gazebase_data.shape[0])]
-            session_ids += [int(np.unique(cur_data['session_id'])) for _ in range(cur_gazebase_data.shape[0])]
+                subset = {
+                    #'subject_id': list(np.arange(100,dtype=np.int32)),
+                    'task_name': [stimulus],
+                    'round_id': list(np.arange(1,max_rounds+1,1)),
+                }
+
+            try:
+                dataset.load()
+            except:
+                dataset.download()
+                dataset.load()
+            
+            
+            num_pairs = len(dataset.gaze)
+            counter = 0
+            num_add = 100000
+            round_ids = np.zeros([num_add,])
+            subject_ids = np.zeros([num_add,])
+            session_ids = np.zeros([num_add,])
+            gaze_seq_data = np.zeros([num_add,5000,2])
+            for i in tqdm(np.arange(num_pairs)):
+                cur_data = dataset.gaze[i].frame
+                cur_gazebase_data = cut_data(cur_data,
+                                                    window=5000,
+                                                    max_vel=.5,
+                                                    )
+                cur_len = cur_gazebase_data.shape[0]
+                while counter + cur_len > gaze_seq_data.shape[0]:
+                    gaze_seq_data = np.concatenate([gaze_seq_data, np.zeros([num_add,5000,2])], axis=0)
+                    round_ids = np.concatenate([round_ids, np.zeros([num_add,])], axis=0)
+                    subject_ids = np.concatenate([subject_ids, np.zeros([num_add,])], axis=0)
+                    session_ids = np.concatenate([session_ids, np.zeros([num_add,])], axis=0)
+                gaze_seq_data[counter:counter+cur_len] = cur_gazebase_data
+                round_ids[counter:counter+cur_len]   = int(np.unique(cur_data['round_id']))
+                subject_ids[counter:counter+cur_len] = int(np.unique(cur_data['subject_id']))
+                session_ids[counter:counter+cur_len] = int(np.unique(cur_data['session_id']))
+                counter += cur_len
+            gaze_seq_data = gaze_seq_data[0:counter]
+            round_ids = round_ids[0:counter]
+            subject_ids = subject_ids[0:counter]
+            session_ids = session_ids[0:counter]
+            
+            unique_user = list(np.unique(subject_ids))
+            print('number of unique_users: ' + str(len(unique_user)))
+            np.random.seed(args.fold)
+            shuffled_user = np.random.permutation(unique_user)
+            train_user = shuffled_user[0:num_train_user]
+            test_user  = shuffled_user[num_train_user:]
+            train_ids  = np.where(np.isin(np.array(subject_ids), train_user))[0]
+            test_ids   = np.where(np.isin(np.array(subject_ids), test_user))[0]
+            print('number train instances: ' + str(len(train_ids)))
+            print('number test instances: ' + str(len(test_ids)))
+
+
+            train_rounds   = np.array(round_ids)[train_ids]
+            test_rounds    = np.array(round_ids)[test_ids]
+            train_subjects = np.array(subject_ids)[train_ids]
+            test_subjects  = np.array(subject_ids)[test_ids]
+            train_sessions = np.array(session_ids)[train_ids]
+            test_sessions  = np.array(session_ids)[test_ids]
+            train_data     = gaze_seq_data[train_ids]
+            test_data      = gaze_seq_data[test_ids]
+            
+            # create training data
+            orig_data = train_data
+            orig_sub  = np.array(train_subjects, dtype=np.int32)
+
+            le = LabelEncoder()
+            sub_transformed = le.fit_transform(orig_sub)
+
+            n_train_users_f = len(np.unique(sub_transformed))
+            y_train = to_categorical(
+                sub_transformed, num_classes=n_train_users_f,
+            )
+
+            seq_len = orig_data.shape[1]
+            n_channels = orig_data.shape[2]
+            num_classes = y_train.shape[1]
+
+            from sklearn.model_selection import StratifiedKFold
+            skf = StratifiedKFold(n_splits=4, shuffle=True, random_state=42)
+            for train_idx, validation_idx in skf.split(orig_data, sub_transformed):
+                break
         
-        unique_user = list(np.unique(subject_ids))
-        print('number of unique_users: ' + str(len(unique_user)))
-        np.random.seed(fold)
-        shuffled_user = np.random.permutation(unique_user)
-        train_user = shuffled_user[0:num_train_user]
-        test_user  = shuffled_user[num_train_user:]
-        train_ids  = np.where(np.isin(np.array(subject_ids), train_user))[0]
-        test_ids   = np.where(np.isin(np.array(subject_ids), test_user))[0]
-        print('number train instances: ' + str(len(train_ids)))
-        print('number test instances: ' + str(len(test_ids)))
+        elif dataset_name == 'judo':
+            dataset = pm.Dataset("JuDo1000", path=config.JUDO_BASE_DIR)
+            try:    
+                dataset.load()
+            except:
+                dataset.download()
+                dataset.load()
+            
+            # convert pixel data to degrees of visual angle
+            dataset.pix2deg()
+            
+            num_pairs = len(dataset.gaze)
+            counter = 0
+            num_add = 100000
+            subject_ids = np.zeros([num_add,])
+            session_ids = np.zeros([num_add,])
+            gaze_seq_data = np.zeros([num_add,5000,2])
+            for i in tqdm(np.arange(num_pairs)):
+                cur_data = dataset.gaze[i].frame
+                cur_cut_data = cut_data(cur_data,
+                                                    window=5000,
+                                                    max_vel=.5,
+                                                    )
+                
+                cur_len = cur_cut_data.shape[0]
+                while counter + cur_len > gaze_seq_data.shape[0]:
+                    gaze_seq_data = np.concatenate([gaze_seq_data, np.zeros([num_add,5000,2])], axis=0)
+                    subject_ids = np.concatenate([subject_ids, np.zeros([num_add,])], axis=0)
+                    session_ids = np.concatenate([session_ids, np.zeros([num_add,])], axis=0)
+                gaze_seq_data[counter:counter+cur_len] = cur_cut_data
+                subject_ids[counter:counter+cur_len] = int(np.unique(cur_data['subject_id']))
+                session_ids[counter:counter+cur_len] = int(np.unique(cur_data['session_id']))
+                counter += cur_len
+            gaze_seq_data = gaze_seq_data[0:counter]
+            subject_ids = subject_ids[0:counter]
+            session_ids = session_ids[0:counter]
+            
+            
+            unique_user = list(np.unique(subject_ids))
+            print('number of unique_users: ' + str(len(unique_user)))
+            np.random.seed(args.fold)
+            shuffled_user = np.random.permutation(unique_user)
+            train_user = shuffled_user[0:num_train_user]
+            test_user  = shuffled_user[num_train_user:]
+            train_ids  = np.where(np.isin(np.array(subject_ids), train_user))[0]
+            test_ids   = np.where(np.isin(np.array(subject_ids), test_user))[0]
+            print('number train instances: ' + str(len(train_ids)))
+            print('number test instances: ' + str(len(test_ids)))
+            
+            
+            train_subjects = np.array(subject_ids)[train_ids]
+            test_subjects  = np.array(subject_ids)[test_ids]
+            train_sessions = np.array(session_ids)[train_ids]
+            test_sessions  = np.array(session_ids)[test_ids]
+            train_data     = gaze_seq_data[train_ids]
+            test_data      = gaze_seq_data[test_ids]
 
+            # create training data
+            orig_data = train_data
+            orig_sub  = np.array(train_subjects, dtype=np.int32)
 
-        train_rounds   = np.array(round_ids)[train_ids]
-        test_rounds    = np.array(round_ids)[test_ids]
-        train_subjects = np.array(subject_ids)[train_ids]
-        test_subjects  = np.array(subject_ids)[test_ids]
-        train_sessions = np.array(session_ids)[train_ids]
-        test_sessions  = np.array(session_ids)[test_ids]
-        train_data     = gaze_seq_data[train_ids]
-        test_data      = gaze_seq_data[test_ids]
+            le = LabelEncoder()
+            sub_transformed = le.fit_transform(orig_sub)
+
+            n_train_users_f = len(np.unique(sub_transformed))
+            y_train = to_categorical(
+                sub_transformed, num_classes=n_train_users_f,
+            )
+
+            seq_len = orig_data.shape[1]
+            n_channels = orig_data.shape[2]
+            num_classes = y_train.shape[1]
+
+            from sklearn.model_selection import StratifiedKFold
+            skf = StratifiedKFold(n_splits=4, shuffle=True, random_state=42)
+            for train_idx, validation_idx in skf.split(orig_data, sub_transformed):
+                break
+            
+        # get model
+        biometric_model = get_biometric_model(encoder_name = encoder_name,
+                                    model_path = model_path,
+                                    num_classes = num_classes,
+                                    temperature = temperature,
+                                    learning_rate = learning_rate,
+                                    )
         
-        # create training data
-        orig_data = train_data
-        orig_sub  = np.array(train_subjects, dtype=np.int32)
-
-        le = LabelEncoder()
-        sub_transformed = le.fit_transform(orig_sub)
-
-        n_train_users_f = len(np.unique(sub_transformed))
-        y_train = to_categorical(
-            sub_transformed, num_classes=n_train_users_f,
+        # get zero-shot embedding
+        embedding_model = Model(
+            inputs=biometric_model.input,
+            #outputs=biometric_model.get_layer('a_final').output,
+            outputs=biometric_model.get_layer('dense').output,
         )
-
-        seq_len = orig_data.shape[1]
-        n_channels = orig_data.shape[2]
-        num_classes = y_train.shape[1]
-
-        from sklearn.model_selection import StratifiedKFold
-        skf = StratifiedKFold(n_splits=4, shuffle=True, random_state=42)
-        for train_idx, validation_idx in skf.split(orig_data, sub_transformed):
-            break
-    
-    elif dataset_name == 'judo':
-        dataset = pm.Dataset("JuDo1000", path=config.JUDO_BASE_DIR)
-        try:    
-            dataset.load()
-        except:
-            dataset.download()
-            dataset.load()
-        
-        # convert pixel data to degrees of visual angle
-        dataset.pix2deg()
-        
-        num_pairs = len(dataset.gaze)
-        session_ids = []
-        subject_ids = []
-        for i in tqdm(np.arange(num_pairs)):
-            cur_data = dataset.gaze[i].frame
-            cur_cut_data = cut_data(cur_data,
-                                                window=5000,
-                                                max_vel=.5,
-                                                )
-            if i == 0:
-                gaze_seq_data = cur_cut_data
-            else:
-                gaze_seq_data = np.concatenate([gaze_seq_data, cur_cut_data], axis=0)
-            subject_ids += [int(np.unique(cur_data['subject_id'])) for _ in range(cur_cut_data.shape[0])]
-            session_ids += [int(np.unique(cur_data['session_id'])) for _ in range(cur_cut_data.shape[0])]
-        
-        
-        unique_user = list(np.unique(subject_ids))
-        print('number of unique_users: ' + str(len(unique_user)))
-        np.random.seed(fold)
-        shuffled_user = np.random.permutation(unique_user)
-        train_user = shuffled_user[0:num_train_user]
-        test_user  = shuffled_user[num_train_user:]
-        train_ids  = np.where(np.isin(np.array(subject_ids), train_user))[0]
-        test_ids   = np.where(np.isin(np.array(subject_ids), test_user))[0]
-        print('number train instances: ' + str(len(train_ids)))
-        print('number test instances: ' + str(len(test_ids)))
-        
-        
-        train_subjects = np.array(subject_ids)[train_ids]
-        test_subjects  = np.array(subject_ids)[test_ids]
-        train_sessions = np.array(session_ids)[train_ids]
-        test_sessions  = np.array(session_ids)[test_ids]
-        train_data     = gaze_seq_data[train_ids]
-        test_data      = gaze_seq_data[test_ids]
-
-        # create training data
-        orig_data = train_data
-        orig_sub  = np.array(train_subjects, dtype=np.int32)
-
-        le = LabelEncoder()
-        sub_transformed = le.fit_transform(orig_sub)
-
-        n_train_users_f = len(np.unique(sub_transformed))
-        y_train = to_categorical(
-            sub_transformed, num_classes=n_train_users_f,
+            
+        embedding_zero_shot = embedding_model.predict(
+            test_data,
+            batch_size=batch_size,
         )
-
-        seq_len = orig_data.shape[1]
-        n_channels = orig_data.shape[2]
-        num_classes = y_train.shape[1]
-
-        from sklearn.model_selection import StratifiedKFold
-        skf = StratifiedKFold(n_splits=4, shuffle=True, random_state=42)
-        for train_idx, validation_idx in skf.split(orig_data, sub_transformed):
-            break
         
-    # get model
-    biometric_model = get_biometric_model(encoder_name = encoder_name,
-                                model_path = model_path,
-                                num_classes = num_classes,
-                                temperature = temperature,
-                                learning_rate = learning_rate,
-                                )
-    
-    
-    # train model
-    if train_model == 1:
+        
         callbacks = [LearningRateScheduler(ekyt_learning_rate_scheduler(max_lr = learning_rate,
                                                         first_steps = 30, max_epochs = 100))]
 
@@ -910,78 +960,136 @@ def main() -> int:
             steps_per_epoch=steps_per_epoch,
             validation_steps=steps_per_val,
         )    
-    
-    
-    
-    # get embedding for test set
-    embedding_model = Model(
-        inputs=biometric_model.input,
-        outputs=biometric_model.get_layer('a_final').output,
-    )
-    embedding = embedding_model.predict(
-        test_data,
-        batch_size=batch_size,
-    )
-    
-    # evaluate
-    if n_enrolled_users == -1:
-        n_enrolled_users = len(np.unique(test_subjects))
-    
-    if dataset_name == 'gazebase':
-        score_dicts, label_dicts, person_one_dicts, person_two_dicts = get_scores_and_labels(
-            test_embeddings = embedding, 
-            test_user = np.array(test_subjects), #
-            test_sessions = np.array(test_sessions), # session
-            test_seqIds = np.array(test_rounds), # round
-            window_sizes = window_sizes,
-            n_train_users=n_train_users,
-            n_enrolled_users=n_enrolled_users,
-            n_impostors=n_impostors,
-            n_enrollment_sessions=1,
-            n_test_sessions=1,
-            user_test_sessions=None,
-            enrollment_sessions=None,
-            verbose=1,
-            random_state=fold,
-            seconds_per_session=None,
-            num_enrollment = 1,
-            )
-    elif dataset_name == 'judo':
-        score_dicts, label_dicts, person_one_dicts, person_two_dicts = get_scores_and_labels(
-            test_embeddings = embedding, 
-            test_user = np.array(test_subjects), #
-            test_sessions = np.array(test_sessions), # session
-            test_seqIds = None, # round
-            window_sizes = window_sizes,
-            n_train_users=n_train_users,
-            n_enrolled_users=n_enrolled_users,
-            n_impostors=n_impostors,
-            n_enrollment_sessions=3,
-            n_test_sessions=1,
-            user_test_sessions=None,
-            enrollment_sessions=None,
-            verbose=1,
-            random_state=fold,
-            seconds_per_session=None,
-            num_enrollment = 1,
-            )
-    
-    # save to files
-    joblib.dump({'score_dicts':score_dicts,
-                 'label_dicts':label_dicts,
-                 'person_one_dicts':person_one_dicts,
-                 'person_two_dicts':person_two_dicts,
-                 'embeddings':embedding,
-                 'test_subjects':test_subjects,
-                 }, result_save_path, compress=3, protocol=2)
-    
-    for window_size in window_sizes:
-        joblib.dump({'scores':score_dicts[str(window_size)],
-                 'labels':label_dicts[str(window_size)],
-                 'person_one':person_one_dicts[str(window_size)],
-                 'person_two':person_two_dicts[str(window_size)],
-                 }, result_save_path.replace('.joblib','_window_size' + str(window_size) + '.joblib'), compress=3, protocol=2)
-    
+        
+        
+        
+        # get embedding for test set
+        embedding_model = Model(
+            inputs=biometric_model.input,
+            #outputs=biometric_model.get_layer('a_final').output,
+            outputs=biometric_model.get_layer('dense').output,
+        )
+            
+        embedding = embedding_model.predict(
+            test_data,
+            batch_size=batch_size,
+        )
+        
+        # evaluate embeddings
+        if n_enrolled_users == -1:
+            n_enrolled_users = len(np.unique(test_subjects))
+        
+        if dataset_name == 'gazebase':
+            score_dicts, label_dicts, person_one_dicts, person_two_dicts = get_scores_and_labels(
+                test_embeddings = embedding, 
+                test_user = np.array(test_subjects), #
+                test_sessions = np.array(test_sessions), # session
+                test_seqIds = np.array(test_rounds), # round
+                window_sizes = window_sizes,
+                n_train_users=n_train_users,
+                n_enrolled_users=n_enrolled_users,
+                n_impostors=n_impostors,
+                n_enrollment_sessions=1,
+                n_test_sessions=1,
+                user_test_sessions=None,
+                enrollment_sessions=None,
+                verbose=1,
+                random_state=args.fold,
+                seconds_per_session=None,
+                num_enrollment = 1,
+                )
+                
+            score_dicts_zero_shot, label_dicts_zero_shot, person_one_dicts_zero_shot, person_two_dicts_zero_shot = get_scores_and_labels(
+                test_embeddings = embedding_zero_shot, 
+                test_user = np.array(test_subjects), #
+                test_sessions = np.array(test_sessions), # session
+                test_seqIds = np.array(test_rounds), # round
+                window_sizes = window_sizes,
+                n_train_users=n_train_users,
+                n_enrolled_users=n_enrolled_users,
+                n_impostors=n_impostors,
+                n_enrollment_sessions=1,
+                n_test_sessions=1,
+                user_test_sessions=None,
+                enrollment_sessions=None,
+                verbose=1,
+                random_state=args.fold,
+                seconds_per_session=None,
+                num_enrollment = 1,
+                )
+            
+        elif dataset_name == 'judo':
+            score_dicts, label_dicts, person_one_dicts, person_two_dicts = get_scores_and_labels(
+                test_embeddings = embedding, 
+                test_user = np.array(test_subjects), #
+                test_sessions = np.array(test_sessions), # session
+                test_seqIds = None, # round
+                window_sizes = window_sizes,
+                n_train_users=n_train_users,
+                n_enrolled_users=n_enrolled_users,
+                n_impostors=n_impostors,
+                n_enrollment_sessions=3,
+                n_test_sessions=1,
+                user_test_sessions=None,
+                enrollment_sessions=None,
+                verbose=1,
+                random_state=args.fold,
+                seconds_per_session=None,
+                num_enrollment = 1,
+                )
+                
+            score_dicts_zero_shot, label_dicts_zero_shot, person_one_dicts_zero_shot, person_two_dicts_zero_shot = get_scores_and_labels(
+                test_embeddings = embedding_zero_shot, 
+                test_user = np.array(test_subjects), #
+                test_sessions = np.array(test_sessions), # session
+                test_seqIds = None, # round
+                window_sizes = window_sizes,
+                n_train_users=n_train_users,
+                n_enrolled_users=n_enrolled_users,
+                n_impostors=n_impostors,
+                n_enrollment_sessions=3,
+                n_test_sessions=1,
+                user_test_sessions=None,
+                enrollment_sessions=None,
+                verbose=1,
+                random_state=args.fold,
+                seconds_per_session=None,
+                num_enrollment = 1,
+                )
+        
+        # save to files
+        joblib.dump({'score_dicts':score_dicts,
+                     'label_dicts':label_dicts,
+                     'person_one_dicts':person_one_dicts,
+                     'person_two_dicts':person_two_dicts,
+                     'embeddings':embedding,
+                     'score_dicts_zero_shot':score_dicts_zero_shot,
+                     'label_dicts_zero_shot':label_dicts_zero_shot,
+                     'person_one_dicts_zero_shot':person_one_dicts_zero_shot,
+                     'person_two_dicts_zero_shot':person_two_dicts_zero_shot,
+                     'embedding_zero_shot':embedding_zero_shot,
+                     'test_subjects':test_subjects,
+                     }, result_save_path, compress=3, protocol=2)
+        
+        for window_size in window_sizes:
+            np.savez(result_save_path.replace('.joblib','_window_size' + str(window_size)),
+                     scores = score_dicts[str(window_size)],
+                     labels = label_dicts[str(window_size)],
+                     person_one = person_one_dicts[str(window_size)],
+                     person_two = person_two_dicts[str(window_size)],
+                     scores_zero_shot = score_dicts_zero_shot[str(window_size)],
+                     labels_zero_shot = label_dicts_zero_shot[str(window_size)],
+                     person_one_zero_shot = person_one_dicts_zero_shot[str(window_size)],
+                     person_two_zero_shot = person_two_dicts_zero_shot[str(window_size)],
+                    )
+                     
+            '''         
+            joblib.dump({'scores':score_dicts[str(window_size)],
+                     'labels':label_dicts[str(window_size)],
+                     'person_one':person_one_dicts[str(window_size)],
+                     'person_two':person_two_dicts[str(window_size)],
+                     }, result_save_path.replace('.joblib','_window_size' + str(window_size) + '.joblib'), compress=3, protocol=2)
+            '''
     return 0
 
 
