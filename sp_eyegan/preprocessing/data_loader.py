@@ -1,14 +1,16 @@
-import sys
+from __future__ import annotations
+
 import os
-import joblib
-import numpy as np
+import pickle
 import random
 import sys
+
+import joblib
+import numpy as np
 import pandas as pd
 import pymovements as pm
-from tqdm import tqdm
-import pickle
 from scipy import interpolate
+from tqdm import tqdm
 
 
 # global params
@@ -77,11 +79,11 @@ def deg2pix(deg, screenPX,screenCM,distanceCM):
     # screenPX is the number of pixels that the monitor has in the horizontal
     # axis (for x coord) or vertical axis (for y coord)
     # screenCM is the width of the monitor in centimeters
-    # distanceCM is the distance of the monitor to the retina 
+    # distanceCM is the distance of the monitor to the retina
     # pix: screen coordinate in pixels
     # adjust origin: if origin (0,0) of screen coordinates is in the corner of the screen rather than in the center, set to True to center coordinates
     deg=np.array(deg)
-    
+
     deg_per_px = degrees(atan2(.5*screenCM, distanceCM)) / (.5*screenPX)
     return deg / deg_per_px
 
@@ -131,7 +133,7 @@ def deg2vel(data,
                      'distance':55.5,
                      'sampling_rate':1000},
             smooth = True):
-    
+
     data_copy = data.copy()
     vel = np.zeros(data_copy.shape)
     for i in range(data_copy.shape[0]):
@@ -220,11 +222,11 @@ def get_data_for_user(
                      'distance':55.5},
     target_sampling_rate = None,
     ):
-    
-    
+
+
     if output_length is None:
         output_length = sampling_rate
-    cur_data = pd.read_csv(data_path)    
+    cur_data = pd.read_csv(data_path)
     if target_sampling_rate is not None:
         x_vals  = np.array(cur_data['x'])
         y_vals  = np.array(cur_data['y'])
@@ -237,10 +239,10 @@ def get_data_for_user(
             x_vals = x_vals[not_nan_ids]
             y_vals = y_vals[not_nan_ids]
             times = times[not_nan_ids]
-            
+
         cur_interpolate_x = interpolate.interp1d(times, x_vals)
         cur_interpolate_y = interpolate.interp1d(times, y_vals)
-        
+
         step_size = sampling_rate / target_sampling_rate
         use_time_stamps = np.arange(np.min(times),np.max(times),step_size)
         x_dva_gazebase = cur_interpolate_x(use_time_stamps)
@@ -248,32 +250,32 @@ def get_data_for_user(
         X = np.array([
             x_dva_gazebase,
             y_dva_gazebase,
-        ]).T        
+        ]).T
         sampling_rate = target_sampling_rate
     else:
         X = np.array([
             cur_data['x'],
             cur_data['y'],
         ]).T
-        
+
         X[np.array(cur_data['val']) != 0,:] = np.nan
         if delete_nans:
             not_nan_ids = np.logical_and(~np.isnan(X[:,0]),~np.isnan(X[:,1]))
             X = X[not_nan_ids,:]
-        
-        
-    
+
+
+
     # transform deg to pix
     if transform_deg_to_px:
         X_px = X.copy()
-        X_px[:,0] = deg2pix(X_px[:,0], 
+        X_px[:,0] = deg2pix(X_px[:,0],
                     screen_config['resolution'][0],
                     screen_config['screen_size'][0],
                     screen_config['distance'])
         # adjust origin
         X_px[:,0] += screen_config['resolution'][0]/2
-        
-        X_px[:,1] = deg2pix(X_px[:,1], 
+
+        X_px[:,1] = deg2pix(X_px[:,1],
                     screen_config['resolution'][1],
                     screen_config['screen_size'][1],
                     screen_config['distance'])
@@ -281,7 +283,7 @@ def get_data_for_user(
         X_px[:,1] += screen_config['resolution'][1]/2
     else:
         X_px = np.zeros(X.shape)
-    
+
     # transform to velocities
     vel_left = vecvel(X, sampling_rate)
     vel_left[vel_left > max_vel] = max_vel
@@ -300,19 +302,19 @@ def get_data_for_user(
         new_seq_len = output_length,
         skip_padded=True,
     )
-    
+
     X_deg_transformed = transform_to_new_seqlen_length(
         X = np.reshape(X,[1,X.shape[0],X.shape[1]]),
         new_seq_len = output_length,
         skip_padded=True,
     )
-    
+
     X_px_transformed = transform_to_new_seqlen_length(
         X = np.reshape(X_px,[1,X_px.shape[0],X_px.shape[1]]),
         new_seq_len = output_length,
         skip_padded=True,
     )
-    
+
     user_dict = {
         'X':X,
         'X_deg':X,
@@ -322,7 +324,7 @@ def get_data_for_user(
         'X_vel':X_vel,
         'X_vel_transformed':X_vel_transformed,
         'path':data_path,
-        
+
     }
     return user_dict
 
@@ -402,9 +404,9 @@ def load_gazebase_data(gaze_base_dir = 'path_to_gazebase_data',
                              'x_left_px':cur_data['X_px'][:,0],
                              'y_left_px':cur_data['X_px'][:,1],
                              'x_dva_left':cur_data['X_deg'][:,0],
-                             'y_dva_left':cur_data['X_deg'][:,1],                
+                             'y_dva_left':cur_data['X_deg'][:,1],
                             }
-            
+
             feature_dict = {'x_vel_dva_left':0,
                              'y_vel_dva_left':1,
                              'x_left_px':2,
@@ -412,10 +414,10 @@ def load_gazebase_data(gaze_base_dir = 'path_to_gazebase_data',
                              'x_dva_left':4,
                              'y_dva_left':5,
                            }
-            
+
             cur_data_matrix = np.zeros([cur_data['X_vel'].shape[0],
                                        len(add_data_dict.keys())])
-            
+
             counter = 0
             for key in add_data_dict.keys():
                 cur_data_matrix[:,counter] = add_data_dict[key]
@@ -424,14 +426,14 @@ def load_gazebase_data(gaze_base_dir = 'path_to_gazebase_data',
             sub_id_list.append(cur_sub_id)
         except:
             print('error with file: ' + str(cur_path))
-    
+
     Y = np.zeros([len(sub_id_list),1])
     Y[:,0] = np.array(sub_id_list)
     y_column_dict = {'subject_id':0,
                     }
     return user_data_list, feature_dict, Y, y_column_dict
-    
-    
+
+
 
 
 # Compute velocity times series from 2D position data
@@ -500,22 +502,22 @@ def preprocess_data(data,sampling_rate):
     y_right_vel = vecvel_vector(y_right_coord_inter) * sampling_rate
     x_pix_diff  = np.abs(x_left_coord_inter - x_right_coord_inter)
     y_pix_diff  = np.abs(y_left_coord_inter - y_right_coord_inter)
-    
-    
+
+
     x_dva_left, y_dva_left = convert_gaze_to_dva(x_left_coord_inter,y_left_coord_inter)
     x_vel_dva_left, y_vel_dva_left = vecvel_vector(x_dva_left) * sampling_rate, vecvel_vector(y_dva_left) * sampling_rate
     x_dva_right, y_dva_right = convert_gaze_to_dva(x_right_coord_inter,y_right_coord_inter)
     x_vel_dva_right, y_vel_dva_right = vecvel_vector(x_dva_right) * sampling_rate, vecvel_vector(y_dva_right) * sampling_rate
-    
-    
-    
-    
+
+
+
+
     corrupt = np.zeros(x_left_coord_inter.shape)
     corrupt[x_left_coord_inter == 0] = 1
     corrupt[x_right_coord_inter == 0] = 1
     corrupt[y_left_coord_inter == 0] = 1
     corrupt[y_right_coord_inter == 0] = 1
-    
+
     return (np.swapaxes(np.vstack([x_left_vel,y_left_vel,
                 x_right_vel,y_right_vel,
                 x_pix_diff,y_pix_diff,
@@ -547,10 +549,10 @@ def preprocess_data(data,sampling_rate):
                  'corrupt':18,
                 }
            )
-    
 
-    
-    
+
+
+
 # function to cut data matrix into pieces
 #    inputs:
 #       data: a 'm x n' matrix

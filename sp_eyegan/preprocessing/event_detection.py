@@ -1,7 +1,10 @@
-import pandas as pd
-import numpy as np
+from __future__ import annotations
+
 import os
 import re
+
+import numpy as np
+import pandas as pd
 
 
 # get list of saccade-ids and fixation-ids with dispersion algorithm
@@ -16,7 +19,7 @@ def get_sacc_fix_lists_dispersion(x_deg, y_deg,
                         verbose=0,
                         max_fixation_dispersion = None,
                                  ):
-    
+
     #  fix=1, saccade=2, corrupt=3
     events = get_i_dt(x_deg, y_deg,
                         corrupt = corrupt,
@@ -29,7 +32,7 @@ def get_sacc_fix_lists_dispersion(x_deg, y_deg,
                         verbose=0,
                         max_fixation_dispersion = None,
                                      )
-    
+
     #  fix=1, saccade=2, corrupt=3
     event_list = np.array(events['event'])
     prev_label = -1
@@ -61,13 +64,13 @@ def get_sacc_fix_lists_dispersion(x_deg, y_deg,
     return {'fixations': fixations,
             'saccades': saccades,
             'errors': errors}, events
-            
-            
-            
-            
-            
-            
-            
+
+
+
+
+
+
+
 '''
 Eye movements were processed with the biometric
 framework described in Section 2, with eye movement
@@ -110,7 +113,7 @@ def get_i_dt(x_coordinates,y_coordinates,
             verbose=0,
             max_fixation_dispersion = None,
             ):
-    
+
     duration_threshold = int(np.floor((min_duration / 1000.) * sampling))
     min_duration_threshold_fixation = np.max([1,int(np.floor((min_event_duration_fixation / 1000.) * sampling))])
     min_duration_threshold_saccade = np.max([1,int(np.floor((min_event_duration_saccade / 1000.) * sampling))])
@@ -118,11 +121,11 @@ def get_i_dt(x_coordinates,y_coordinates,
         dispersion_threshold = (velocity_threshold / 1000. * min_duration)
     else:
         dispersion_threshold = max_fixation_dispersion
-    
+
     d = { 'x_deg':x_coordinates,
           'y_deg':y_coordinates}
     d = pd.DataFrame(d)
-    
+
     sacc = np.ones([len(x_coordinates),])
     start_id = 0
     end_id   = start_id + duration_threshold
@@ -150,7 +153,7 @@ def get_i_dt(x_coordinates,y_coordinates,
         #print('x_coordintes: ' + str(cur_x_window))
         #print('y_coordintes: ' + str(cur_y_window))
         #print('cur_dispersion: ' + str(cur_dispersion))
-        
+
         if cur_dispersion <= dispersion_threshold and end_id <= len(x_coordinates):
             end_id += 1
             #print('start_id: ' + str(start_id))
@@ -170,9 +173,9 @@ def get_i_dt(x_coordinates,y_coordinates,
             if counter % 1000 == 0:
                 print(counter)
     sacc[np.isnan(d['x_deg'])] = 3
-    
+
     d['sac'] = sacc
-    
+
     if corrupt is None:
         nan_ids_x = list(np.where(np.isnan(x_coordinates))[0])
         nan_ids_y = list(np.where(np.isnan(y_coordinates))[0])
@@ -182,7 +185,7 @@ def get_i_dt(x_coordinates,y_coordinates,
         nan_ids_x = list(np.where(np.isnan(x_coordinates))[0])
         nan_ids_y = list(np.where(np.isnan(y_coordinates))[0])
         corruptIdx = list(set(corruptIdx + nan_ids_x + nan_ids_y))
-    
+
     # corrupt samples
     d['corrupt'] = d.index.isin(corruptIdx)
     d['event'] = np.where(d.corrupt, 3, np.where(d.sac,2,1))

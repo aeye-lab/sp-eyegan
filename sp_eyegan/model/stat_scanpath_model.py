@@ -1,3 +1,5 @@
+from __future__ import annotations
+
 import numpy as np
 
 
@@ -6,7 +8,7 @@ class satisticalScanPath():
         self,
     ):
         self.name    = 'statistical scan path model'
-        
+
     def sample_fix_duraton_prob(self, word):
         word_len = len(word)
         if word_len == 1:
@@ -66,8 +68,8 @@ class satisticalScanPath():
         x_dva = x_locations / screen_config['px_x'] * screen_config['max_dva_x']
         y_dva = y_locations / screen_config['px_y'] * screen_config['max_dva_y']
         return x_locations, y_locations, x_dva, y_dva, fix_durations
-    
-    
+
+
     def dva_to_vel(self, vector):
         vel = np.array(vector[1:]) - np.array(vector[0:-1])
         vel = np.array([0] + list(vel))

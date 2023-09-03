@@ -1,19 +1,22 @@
-import os
-import numpy as np
-import random
-from tqdm import tqdm
-import sys
-import joblib
-import seaborn as sns
-import pandas as pd
+from __future__ import annotations
+
 import argparse
+import os
+import random
+import sys
+
+import joblib
+import numpy as np
+import pandas as pd
+import seaborn as sns
 import tensorflow
 import tensorflow as tf
 from tensorflow import keras
-import config as config
+from tqdm import tqdm
 
-from Preprocessing import data_loader as data_loader
-from Model import contrastive_learner as contrastive_learner
+import config as config
+from sp_eyegan.model import contrastive_learner as contrastive_learner
+from sp_eyegan.preprocessing import data_loader as data_loader
 
 
 
@@ -57,11 +60,10 @@ def main():
     parser.add_argument('-scanpath_model','--scanpath_model',type=str,default='random') # random|stat_model
     parser.add_argument('-num_pretrain_instances','--num_pretrain_instances',type=int,default=-1)
     parser.add_argument('-flag_redo','--flag_redo',type=int,default=0)
-    parser.add_argument('-data_suffix','--data_suffix',type=str,default='baseline_1000')
     parser.add_argument('-data_path','--data_path',type=str,default=None)
-    
-    
-    
+
+
+
     args = parser.parse_args()
     GPU = args.GPU
     temperature = args.temperature
@@ -82,23 +84,23 @@ def main():
     scanpath_model = args.scanpath_model
     num_pretrain_instances = args.num_pretrain_instances
     flag_redo = args.flag_redo
+    os.makedirs(model_dir, exist_ok=True)
     if flag_redo == 1:
         flag_redo = True
     else:
         flag_redo = False
-    data_suffix = args.data_suffix
     orig_sampling_rate = args.orig_sampling_rate
     target_sampling_rate = args.target_sampling_rate
-    
+
     model_window_size = int(window_size / (orig_sampling_rate / target_sampling_rate))
     skip_rate = int(orig_sampling_rate / target_sampling_rate)
-    
-    
+
+
     if encoder_name == 'clrgaze':
         embedding_size = 512
     elif encoder_name == 'ekyt':
         embedding_size = 128
-    
+
     if augmentation_mode == 'crop':
         contrastive_augmentation = {'window_size': model_window_size, 'overall_size': overall_size,'channels':channels, 'name':'crop'}
         model_save_path = model_dir + encoder_name + '_' + augmentation_mode + '_window_size_' + str(model_window_size) +\
@@ -128,21 +130,20 @@ def main():
                             '_embedding_size_' + str(embedding_size) + '_stimulus_' + str(stimulus) +\
                             '_model_' + str(scanpath_model) + '_' + str(num_pretrain_instances)
         per_process_gpu_memory_fraction = 1.
-    
-    model_save_path += data_suffix
-    
+
+
     if not flag_redo and (os.path.exists(model_save_path) or os.path.exists(model_save_path + '.index')):
         print('already exists')
         return 0
-    
+
     print('pretrain config: ' + str(contrastive_augmentation))
-        
+
     flag_train_on_gpu = True
     if flag_train_on_gpu:
         import tensorflow as tf
         # select graphic card
-        os.environ["CUDA_VISIBLE_DEVICES"] = str(GPU)
-        os.environ["CUDA_DEVICE_ORDER"] = "PCI_BUS_ID"
+        os.environ['CUDA_VISIBLE_DEVICES'] = str(GPU)
+        os.environ['CUDA_DEVICE_ORDER'] = 'PCI_BUS_ID'
         config = tf.compat.v1.ConfigProto(log_device_placement=True)
         config.gpu_options.per_process_gpu_memory_fraction = per_process_gpu_memory_fraction
         config.gpu_options.allow_growth = True
@@ -151,18 +152,15 @@ def main():
         import tensorflow as tf
         # select graphic card
         os.environ['CUDA_VISIBLE_DEVICES'] = '-1'
-        
-        
+
+
     # load data
     if stimulus != 'original':
         if args.data_path is not None:
             syn_data_path = args.data_path
         else:
-            if window_size != 5000:
-                syn_data_path = data_dir + 'synthetic_data_' + str(stimulus) + '_' + str(scanpath_model) + '_' + str(output_size) + data_suffix + '.npy'
-            else:
-                syn_data_path = data_dir + 'synthetic_data_' + str(stimulus) + '_' + str(scanpath_model) + data_suffix + '.npy'            
-        
+            syn_data_path = data_dir + 'synthetic_data_' + str(stimulus) + '_' + str(scanpath_model) + '_' + str(window_size) + '.npy'
+
         print('load ' + str(syn_data_path))
         syn_data = np.load(syn_data_path)
         if num_pretrain_instances != -1:
@@ -185,34 +183,34 @@ def main():
         X_vel = X_dict.copy()['X_vel'] / 1000. # bring to range 0-1
         X_px = X_dict.copy()['X_px']
         syn_data = X_vel
-        
+
         if skip_rate != 1:
             skips = np.arange(0,window_size,skip_rate)[0:model_window_size]
             syn_data = syn_data[:,skips,:]
-    
+
     if augmentation_mode == 'mixed':
-        train_dataset_random =  contrastive_learner.prepare_prtrain_dataset_from_array(unlabeled_train_data = syn_data, 
+        train_dataset_random =  contrastive_learner.prepare_prtrain_dataset_from_array(unlabeled_train_data = syn_data,
                                                                                                batch_size = batch_size)
-                                                                                               
+
         syn_data_dva = np.zeros(syn_data.shape)
         for i in tqdm(np.arange(syn_data_dva.shape[0])):
             syn_data_dva[i] = vel_to_dva(np.array(syn_data[i]))
-        train_dataset_rotation =  contrastive_learner.prepare_prtrain_dataset_from_array(unlabeled_train_data = syn_data_dva, 
-                                                                                       batch_size = batch_size)                                                                                    
+        train_dataset_rotation =  contrastive_learner.prepare_prtrain_dataset_from_array(unlabeled_train_data = syn_data_dva,
+                                                                                       batch_size = batch_size)
     else:
-    
-    
+
+
         # create train data and train model
         if augmentation_mode != 'rotation':
-            train_dataset =  contrastive_learner.prepare_prtrain_dataset_from_array(unlabeled_train_data = syn_data, 
+            train_dataset =  contrastive_learner.prepare_prtrain_dataset_from_array(unlabeled_train_data = syn_data,
                                                                                                batch_size = batch_size)
         else:
             syn_data_dva = np.zeros(syn_data.shape)
             for i in tqdm(np.arange(syn_data_dva.shape[0])):
                 syn_data_dva[i] = vel_to_dva(np.array(syn_data[i]))
-            train_dataset =  contrastive_learner.prepare_prtrain_dataset_from_array(unlabeled_train_data = syn_data_dva, 
+            train_dataset =  contrastive_learner.prepare_prtrain_dataset_from_array(unlabeled_train_data = syn_data_dva,
                                                                                            batch_size = batch_size)
-    
+
     # model training
     # Contrastive pretraining
     pretraining_model = contrastive_learner.ContrastiveModel(temperature=temperature,
@@ -224,7 +222,7 @@ def main():
     pretraining_model.compile(
         contrastive_optimizer=keras.optimizers.Adam(),
     )
-    
+
     if augmentation_mode == 'mixed':
         for epoch_num in range(num_epochs):
             modulo = epoch_num % 2
@@ -239,7 +237,7 @@ def main():
             if cur_mode == 'random':
                 contrastive_augmentation = {'window_size': model_window_size, 'channels':channels, 'name':'random','sd':sd}
                 pretraining_model.set_augmenter(contrastive_augmentation)
-                
+
                 pretraining_history = pretraining_model.fit(
                     train_dataset_random, epochs=1,
                 )
@@ -249,7 +247,7 @@ def main():
                 pretraining_history = pretraining_model.fit(
                     train_dataset_rotation, epochs=1,
                 )
-            
+
             if flag_save:
                 pretraining_model.save_encoder_weights(model_save_path + '_checkpoint_' + str(epoch_num))
     else:
@@ -277,8 +275,7 @@ def main():
             )
 
     pretraining_model.save_encoder_weights(model_save_path)
-    
-    
-if __name__ == "__main__":
-    # execute only if run as a script
-    main()
+
+
+if __name__ == '__main__':
+    raise SystemExit(main())

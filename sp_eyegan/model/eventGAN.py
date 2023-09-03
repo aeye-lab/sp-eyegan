@@ -1,24 +1,30 @@
-import time
-import numpy as np
-from tqdm import tqdm
+from __future__ import annotations
 
+import time
+
+import numpy as np
 import tensorflow
 import tensorflow as tf
-from tensorflow.keras.losses import CategoricalCrossentropy
-from tensorflow.keras.callbacks import LearningRateScheduler
 from tensorflow.keras.callbacks import EarlyStopping
-from tensorflow.keras.layers import Activation, LeakyReLU, Reshape
+from tensorflow.keras.callbacks import LearningRateScheduler
+from tensorflow.keras.layers import Activation
 from tensorflow.keras.layers import AveragePooling1D
-from tensorflow.keras.layers import GlobalAveragePooling1D, Dropout
 from tensorflow.keras.layers import BatchNormalization
 from tensorflow.keras.layers import Concatenate
-from tensorflow.keras.layers import Conv1D, Conv1DTranspose
+from tensorflow.keras.layers import Conv1D
+from tensorflow.keras.layers import Conv1DTranspose
 from tensorflow.keras.layers import Dense
+from tensorflow.keras.layers import Dropout
 from tensorflow.keras.layers import Flatten
+from tensorflow.keras.layers import GlobalAveragePooling1D
 from tensorflow.keras.layers import Input
 from tensorflow.keras.layers import Layer
+from tensorflow.keras.layers import LeakyReLU
+from tensorflow.keras.layers import Reshape
+from tensorflow.keras.losses import CategoricalCrossentropy
 from tensorflow.keras.models import clone_model
 from tensorflow.keras.models import Model
+from tqdm import tqdm
 
 
 class eventGAN():
@@ -37,21 +43,21 @@ class eventGAN():
         self.random_size      = model_config['random_size']
         self.batch_size       = model_config['batch_size']
         self.relu_in_last     = model_config['relu_in_last']
-        
+
         self.generator_optimizer = tf.keras.optimizers.Adam(1e-4)
         self.discriminator_optimizer = tf.keras.optimizers.Adam(1e-4)
-        
-    def save_model(self,model_path = None):        
+
+    def save_model(self,model_path = None):
         self.generator.save_weights(
                 model_path,
             )
-    
+
     def load_model(self,model_path):
         self.generator.load_weights(
             model_path
         )
-    
-    
+
+
     @staticmethod
     def build_model(model_config,
                     ):
@@ -67,19 +73,19 @@ class eventGAN():
 
         layer_list = [dense_1,bn_1,leaky_relu_1,reshape_1]
         for i in range(len(model_config['gen_filter_sizes'])-1):
-            layer_list.append(Conv1DTranspose(model_config['gen_filter_sizes'][i+1], (model_config['gen_kernel_sizes'][i+1]), padding='same', use_bias = False)(layer_list[-1]))            
+            layer_list.append(Conv1DTranspose(model_config['gen_filter_sizes'][i+1], (model_config['gen_kernel_sizes'][i+1]), padding='same', use_bias = False)(layer_list[-1]))
             if i == len(model_config['gen_filter_sizes'])-2 and not model_config['relu_in_last']:
                 continue
             else:
                 layer_list.append(BatchNormalization()(layer_list[-1]))
                 layer_list.append(LeakyReLU()(layer_list[-1]))
-                
+
         generator = Model(
                 inputs=input_generator,
                 outputs=[layer_list[-1]], name = 'generator'
             )
-        
-        
+
+
         input_discriminator = Input(
                                 shape=(model_config['window_size'],model_config['channels']), name='random_input',
                             )
@@ -101,7 +107,7 @@ class eventGAN():
             )
 
         return generator, discriminator
-    
+
     @staticmethod
     def discriminator_loss(real_output, fake_output):
         # This method returns a helper function to compute cross entropy loss
@@ -117,8 +123,8 @@ class eventGAN():
         # This method returns a helper function to compute cross entropy loss
         cross_entropy = tf.keras.losses.BinaryCrossentropy(from_logits=True)
         return cross_entropy(tf.ones_like(fake_output), fake_output)
-    
-    
+
+
     @tf.function
     def train_step(self,images, verbose = 0):
         noise = tf.random.normal([self.batch_size, self.random_size])
@@ -141,8 +147,8 @@ class eventGAN():
             print('generator loss: ' + str(np.round(gen_loss,decimals = 3)) +\
                   'discrimator loss: ' + str(np.round(disc_loss,decimals = 3)))
         return gen_loss, disc_loss
-    
-    
+
+
     def train(self, dataset, epochs, verbose = 0):
         gen_loss_list  = []
         disc_loss_list = []
@@ -161,14 +167,14 @@ class eventGAN():
                           '    generator loss: ' + str(np.round(gen_loss_list[-1],decimals = 3)) +\
                           '    discrimator loss: ' + str(np.round(disc_loss_list[-1],decimals = 3)))
         return gen_loss_list, disc_loss_list
-        
-        
-        
-        
-        
+
+
+
+
+
 class dataGenerator():
     def __init__(
-        self, 
+        self,
         gan_config,
         model_config_fixation,
         model_config_saccade,
@@ -186,16 +192,16 @@ class dataGenerator():
         self.std_fix_len   = gan_config['std_fix_len']
         self.fixation_path = gan_config['fixation_path']
         self.saccade_path  = gan_config['saccade_path']
-        
+
         # load fixation GAN
         self.fix_model = eventGAN(self.model_config_fixation)
         self.fix_model.load_model(self.fixation_path)
-        
+
         # load saccade GAN
         self.sac_model = eventGAN(self.model_config_saccade)
-        self.sac_model.load_model(self.saccade_path)        
-    
-    
+        self.sac_model.load_model(self.saccade_path)
+
+
     def sample_scanpath_dataset_stat_model(self,
                                            stat_model,
                                            text_lists,
@@ -212,7 +218,7 @@ class dataGenerator():
             vel = np.array(vector[1:]) - np.array(vector[0:-1])
             vel = np.array([0] + list(vel))
             return vel
-        
+
         output_data     = np.zeros([num_samples,output_size,self.channels])
         if store_dva_data:
             output_data_dva = np.zeros([num_samples,output_size,self.channels])
@@ -237,7 +243,7 @@ class dataGenerator():
                                         fixation_durations = fix_durations,
                                         saccade_durations = saccade_durations,
                                        )
-                
+
                 x_vels, y_vels = dva_to_vel(x_locs), dva_to_vel(y_locs)
                 min_id = 0
                 max_id = len(x_vels) - (output_size +1)
@@ -256,8 +262,8 @@ class dataGenerator():
         return {'vel_data': output_data,
                 'dva_data': output_data_dva,
                }
-    
-    
+
+
     def sample_scanpath(self,
                         x_fix_locations,
                         y_fix_locations,
@@ -283,7 +289,7 @@ class dataGenerator():
                 cur_y_pos = y_px[-1]
             return np.concatenate([np.expand_dims(np.array(x_px),axis=1),
                                    np.expand_dims(np.array(y_px),axis=1)],axis=1)
-        
+
         def unit_vector(vector):
             return vector / np.linalg.norm(vector)
 
@@ -294,7 +300,7 @@ class dataGenerator():
 
         def vector_length(vector):
             return np.sqrt(np.sum(np.power(vector,2)))
-        
+
         def sample_saccades(num_sample,saccade_model,
                             mean_sacc_len = 20,
                             std_sacc_len  = 10,
@@ -352,7 +358,7 @@ class dataGenerator():
                 distances = []
                 for jj in tqdm(np.arange(len(sampled_saccades)),disable = True):
                     cur_vels = sampled_saccades[jj]
-                    cur_dva = vel_to_dva(cur_vels)  
+                    cur_dva = vel_to_dva(cur_vels)
                     x_dva = cur_dva[:,0]
                     y_dva = cur_dva[:,1]
 
@@ -364,7 +370,7 @@ class dataGenerator():
                     break
             use_saccade = sampled_saccades[min_id]
 
-            cur_dva = vel_to_dva(use_saccade)  
+            cur_dva = vel_to_dva(use_saccade)
             x_dva = cur_dva[:,0]
             y_dva = cur_dva[:,1]
 
@@ -373,7 +379,7 @@ class dataGenerator():
             diffs = []
             for try_angle in try_angles:
                 rotation_matrix = np.array([[np.cos(try_angle),-np.sin(try_angle)],
-                                        [np.sin(try_angle),np.cos(try_angle)]])            
+                                        [np.sin(try_angle),np.cos(try_angle)]])
                 rotated_points = np.transpose(np.dot(rotation_matrix,np.transpose(cur_dva)))
 
                 x_locations = list(rotated_points[:,0] + start_location[0])
@@ -385,20 +391,20 @@ class dataGenerator():
             angle = try_angles[min_diff_id]
 
             rotation_matrix = np.array([[np.cos(angle),-np.sin(angle)],
-                                    [np.sin(angle),np.cos(angle)]])            
+                                    [np.sin(angle),np.cos(angle)]])
             rotated_points = np.transpose(np.dot(rotation_matrix,np.transpose(cur_dva)))
 
             x_locations = list(rotated_points[:,0] + start_location[0])
             y_locations = list(rotated_points[:,1] + start_location[1])
-            return x_locations, y_locations                    
-        
+            return x_locations, y_locations
+
         # set start to first fix location
         x_location = [x_fix_locations[0]]
         y_location = [y_fix_locations[0]]
         for i in tqdm(np.arange(len(x_fix_locations)-1),disable = True):
             x_target_location = x_fix_locations[i+1]
             y_target_location = y_fix_locations[i+1]
-            
+
             if fixation_durations is None:
                 # sample fixation
                 fix_duration = -1
@@ -406,9 +412,9 @@ class dataGenerator():
                     fix_duration = int(np.random.normal(self.mean_fix_len,self.std_fix_len,(1)))
             else:
                 fix_duration = fixation_durations[i]
-                
+
             num_fix_samples = int(np.ceil(fix_duration / self.fix_window_size))
-            
+
 
             noise = tf.random.normal([num_fix_samples, self.random_size])
             gen_fixations = np.array(self.fix_model.generator(noise, training=False),dtype=np.float32)
@@ -416,7 +422,7 @@ class dataGenerator():
             fix_data = fix_data[0:fix_duration]
 
             # convert to dva
-            fix_dva = vel_to_dva(fix_data)    
+            fix_dva = vel_to_dva(fix_data)
             x_location += list(fix_dva[:,0] + x_location[-1])
             y_location += list(fix_dva[:,1] + y_location[-1])
 
@@ -449,11 +455,11 @@ class dataGenerator():
                 noise = tf.random.normal([num_sample_saccs, random_size])
                 gen_saccades = np.array(sac_model.generator(noise, training=False),dtype=np.float32)
 
-                # calculate amplitudes for sampled 
+                # calculate amplitudes for sampled
                 distances = []
                 for jj in tqdm(np.arange(gen_saccades.shape[0]),disable = True):
                     cur_vels = gen_saccades[jj]
-                    cur_dva = vel_to_dva(cur_vels)  
+                    cur_dva = vel_to_dva(cur_vels)
                     x_dva = cur_dva[:,0]
                     y_dva = cur_dva[:,1]
 
@@ -470,9 +476,9 @@ class dataGenerator():
                 cur_x_distance = x_target_location - x_location[-1]
                 cur_y_distance = y_target_location - y_location[-1]
 
-                angle = angle_between([cur_x_distance,cur_y_distance],[x_dva[-1],y_dva[-1]])            
+                angle = angle_between([cur_x_distance,cur_y_distance],[x_dva[-1],y_dva[-1]])
                 rotation_matrix = np.array([[np.cos(angle),-np.sin(angle)],
-                                        [np.sin(angle),np.cos(angle)]])            
+                                        [np.sin(angle),np.cos(angle)]])
                 rotated_points = np.transpose(np.dot(rotation_matrix,np.transpose(cur_dva)))
 
                 x_location += list(rotated_points[:,0] + x_location[-1])
@@ -485,24 +491,24 @@ class dataGenerator():
                 if counter > max_iter:
                     break
         return x_location, y_location
-        
-        
-        
+
+
+
     def sample_random_data(self,
                         num_samples,
                         output_size,
                         ):
         output_data = np.zeros([num_samples,output_size,self.channels])
-        
+
         # sample fixation and saccade data
         fix_noise = tf.random.normal([self.model_config_fixation['batch_size'], self.random_size])
         cur_fix_data = self.fix_model.generator(fix_noise)
         cur_fix_counter = 0
-        
+
         sac_noise = tf.random.normal([self.model_config_saccade['batch_size'], self.random_size])
         cur_sac_data = self.sac_model.generator(sac_noise)
         cur_sac_counter = 0
-        
+
         for i in tqdm(np.arange(num_samples)):
             counter = 0
             while True:
@@ -510,15 +516,15 @@ class dataGenerator():
                 fix_duration = -1
                 while fix_duration <= 0:
                     fix_duration = int(np.random.normal(self.mean_fix_len,self.std_fix_len,(1)))
-                
+
                 # sample saccade duration
                 sac_duration = -1
                 while sac_duration <= 0:
                     sac_duration = int(np.random.normal(self.mean_sacc_len,self.std_sacc_len,(1)))
-                
+
                 num_fix_samples = int(np.ceil(fix_duration / self.fix_window_size))
                 num_sac_samples = int(np.ceil(sac_duration / self.sac_window_size))
-                
+
                 # select random fixations and saccades
                 if cur_fix_counter + num_fix_samples >= cur_fix_data.shape[0]:
                     fix_noise = tf.random.normal([self.model_config_fixation['batch_size'], self.random_size])
@@ -527,8 +533,8 @@ class dataGenerator():
                 fix_data = cur_fix_data[cur_fix_counter:cur_fix_counter + num_fix_samples]
                 fix_data = np.reshape(fix_data,[fix_data.shape[0]*fix_data.shape[1],fix_data.shape[2]])
                 cur_fix_counter += num_fix_samples
-                
-                
+
+
                 if cur_sac_counter + num_sac_samples >= cur_sac_data.shape[0]:
                     sac_noise = tf.random.normal([self.model_config_saccade['batch_size'], self.random_size])
                     cur_sac_data = self.sac_model.generator(sac_noise)
@@ -536,17 +542,17 @@ class dataGenerator():
                 sac_data = cur_sac_data[cur_sac_counter:cur_sac_counter + num_sac_samples]
                 sac_data = np.reshape(sac_data,[sac_data.shape[0]*sac_data.shape[1],sac_data.shape[2]])
                 cur_sac_counter += num_sac_samples
-                
+
                 '''
                 fix_noise = tf.random.normal([num_fix_samples, self.random_size])
                 fix_data = self.fix_model.generator(fix_noise)
                 fix_data = np.reshape(fix_data,[fix_data.shape[0]*fix_data.shape[1],fix_data.shape[2]])
-                
+
                 sac_noise = tf.random.normal([num_sac_samples, self.random_size])
                 sac_data = self.sac_model.generator(sac_noise)
                 sac_data = np.reshape(sac_data,[sac_data.shape[0]*sac_data.shape[1],sac_data.shape[2]])
                 '''
-                
+
                 if counter == 0:
                     sample = np.concatenate([fix_data[0:fix_duration],
                                              sac_data[0:sac_duration]],axis=0)

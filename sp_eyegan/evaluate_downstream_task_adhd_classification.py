@@ -1,37 +1,40 @@
+from __future__ import annotations
+
+import argparse
 import os
-import numpy as np
 import random
-from tqdm import tqdm
 import sys
+
 import joblib
-import seaborn as sns
+import numpy as np
 import pandas as pd
+import seaborn as sns
+import tensorflow as tf
+from pymovements.gaze.transforms import pix2deg
+from pymovements.gaze.transforms import pos2vel
 from scipy import interpolate
 from scipy.spatial import distance
+from scipy.stats import ttest_1samp
+from scipy.stats import ttest_ind
 from sklearn import metrics
-from scipy.stats import ttest_ind, ttest_1samp
-from pymovements.gaze.transforms import pix2deg, pos2vel
-
-from sklearn.preprocessing import LabelEncoder
-from tensorflow.keras.utils import to_categorical
-import tensorflow as tf
+from sklearn.ensemble import RandomForestClassifier
 from sklearn.metrics import roc_auc_score
+from sklearn.model_selection import GridSearchCV
 from sklearn.model_selection import KFold
 from sklearn.model_selection import StratifiedKFold
+from sklearn.preprocessing import LabelEncoder
 from sklearn.preprocessing import StandardScaler
 from tensorflow.keras.callbacks import EarlyStopping
 from tensorflow.keras.layers import Dense
-from tensorflow.keras.optimizers import Adam
-import argparse
-
-
 from tensorflow.keras.models import Model
-from Preprocessing import data_loader as data_loader
-from Model import contrastive_learner as contrastive_learner
-from sklearn.ensemble import RandomForestClassifier
-from sklearn.model_selection import GridSearchCV
+from tensorflow.keras.optimizers import Adam
+from tensorflow.keras.utils import to_categorical
+from tqdm import tqdm
+
 import config as config
-from gpu_selection import select_gpu
+from sp_eyegan.gpu_selection import select_gpu
+from sp_eyegan.model import contrastive_learner as contrastive_learner
+from sp_eyegan.preprocessing import data_loader as data_loader
 
 
 def cut_data(data,
@@ -81,7 +84,7 @@ def configure_gpu(args: argparse.Namespace) -> None:
 
 def save_model(model,
                model_path,
-              ):    
+              ):
     model.save_weights(
             model_path,
         )
@@ -95,15 +98,15 @@ def load_weights(model,
 
 def get_model(args: argparse.Namespace) -> Model:
     print(' === Loading model ===')
-    
-    if args.pretrain_model_path is None:        
+
+    if args.pretrain_model_path is None:
         contrastive_augmentation = {
             'window_size': args.window_size,
             'channels': args.channels,
             'name': 'random',
             'sd': args.sd,
         }
-        
+
         # load contrastive pretrained model
         pretraining_model = contrastive_learner.ContrastiveModel(
             temperature=args.temperature,
@@ -135,7 +138,7 @@ def get_model(args: argparse.Namespace) -> Model:
                 inputs=pretraining_model.encoder.get_layer('velocity_input').input,
                 outputs=[dense_out], name='classifier',
     )
-    
+
     if args.pretrain_model_path is not None:
         print('load weights from: ' + str(args.pretrain_model_path))
         classification_model = load_weights(classification_model, args.pretrain_model_path)
@@ -150,7 +153,7 @@ def get_argument_parser() -> argparse.Namespace:
     parser = argparse.ArgumentParser()
     parser.add_argument('--stimulus', type=str, default='TEX')
     parser.add_argument('--encoder_name', type=str, default='ekyt')
-    
+
     parser.add_argument('--pretrain_augmentation_mode', type=str, default=None)#'random')
     parser.add_argument('--pretrain_stimulus', type=str, default='text')
     parser.add_argument('--pretrain_encoder_name', type=str, default='ekyt')
@@ -165,12 +168,12 @@ def get_argument_parser() -> argparse.Namespace:
     parser.add_argument('--pretrain_checkpoint', type=int, default=-1)
     parser.add_argument('--pretrain_data_suffix', type=str, default='')
     parser.add_argument('--pretrain_model_path', type=str, default=None)
-    
-    
+
+
     parser.add_argument('--result_dir', type=str, default='results/')
     parser.add_argument('--gpu', type=int, default=-1)
     parser.add_argument('--n_folds', type=int, default=10)
-    parser.add_argument('--n_rounds', type=int, default=10)    
+    parser.add_argument('--n_rounds', type=int, default=10)
     parser.add_argument('--fold', type=int, default=-1)
     parser.add_argument('--flag_redo', type=int, default=0)
     parser.add_argument('--num_train', type=int, default=-1)
@@ -179,7 +182,7 @@ def get_argument_parser() -> argparse.Namespace:
     parser.add_argument('--video', type=str, default='Video_Fractals')
     parser.add_argument('--save_suffix', type=str, default='')
     parser.add_argument('--fine_tune', type=int, default=1)
-    
+
     args = parser.parse_args()
     return args
 
@@ -196,16 +199,16 @@ def load_px(px_load_path):
 
 def main() -> int:
     args = get_argument_parser()
-    
-    
+
+
     print(' === Configuring GPU ===')
-    
+
     if args.gpu == -1:
         args.gpu = select_gpu(7700)
     print('~' * 79)
     print(f'{args.gpu=}')
     print('~' * 79)
-    
+
     # get params
     stimulus = args.stimulus
     encoder_name = args.encoder_name
@@ -231,7 +234,7 @@ def main() -> int:
     pretrain_channels = args.pretrain_channels
     pretrain_checkpoint = args.pretrain_checkpoint
     pretrain_data_suffix = args.pretrain_data_suffix
-    
+
     sampling_rate = args.sampling_rate
     window_sec = 5
     window_size = sampling_rate * window_sec
@@ -239,15 +242,15 @@ def main() -> int:
     args.channels = 2
     args.sd = pretrain_sd
     args.sd_factor = pretrain_sd_factor
-    
-    param_grid = { 
+
+    param_grid = {
         'n_estimators': [500, 1000],
         'max_features': ['sqrt', 'log2'],
         'max_depth' : [2,4,8,16,32, None],
         'criterion' :['entropy'],
         'n_jobs': [-1]
     }
-    
+
     if args.pretrain_model_path is None:
         if args.fine_tune != 0:
             pretrain_model_dir = config.CONTRASTIVE_PRETRAINED_MODELS_DIR
@@ -267,7 +270,7 @@ def main() -> int:
             args.embedding_size = 512
         elif args.encoder_name == 'ekyt':
             args.embedding_size = 128
-    
+
     if args.pretrain_model_path is not None:
         args.pretrained_model_name = args.pretrain_model_path.split('/')[-1]
     else:
@@ -275,36 +278,36 @@ def main() -> int:
             args.pretrained_model_name = 'CLRGAZE'
         elif args.encoder_name == 'ekyt':
             args.pretrained_model_name = 'EKYT'
-    
+
     result_save_path = result_dir + str(args.pretrained_model_name) + '_adhd.joblib'
-        
+
     if args.num_train != -1:
         result_save_path = result_save_path.replace('.joblib', '_num_train_' + str(args.num_train) + '.joblib')
-    
+
     result_save_path = result_save_path.replace('.joblib', '_video_' + str(args.video) + '.joblib')
-            
+
     if args.save_suffix != '':
         result_save_path = result_save_path.replace('.joblib', '_' + str(args.save_suffix) + '.joblib')
-    
+
     if not flag_redo and os.path.exists(result_save_path):
         print('skip evaluation (already exists) [' + str(result_save_path) + ']')
         return 0
-    
+
     # params
     args.temperature = 0.1
     args.print_model_summary = False
     args.learning_rate = 0.0001
     args.num_epochs = 100
     args.batch_size = 32
-    
+
     # set up gpu
     configure_gpu(args)
-    
+
     # load data
     data_dir   = config.ADHD_DATA_DIR
     label_file = config.ADHD_LABEL_PATH
     file_list  = os.listdir(data_dir)
-    
+
     use_files = []
     use_users = []
     for file in file_list:
@@ -313,7 +316,7 @@ def main() -> int:
             use_users.append(file.split('_')[2])
     print('number of files for Fun with Fractals: ' + str(len(use_files)))
     print('number of unique users: ' + str(len(np.unique(use_users))))
-    
+
     label_data = pd.read_csv(label_file, sep = '\t')
 
     subId_data = list(label_data['Patient_ID'])
@@ -321,7 +324,7 @@ def main() -> int:
     user_label_dict = dict()
     for i in range(len(label_data)):
         user_label_dict[subId_data[i]] = label_data[i]
-    
+
     files = []
     users = []
     label = []
@@ -332,7 +335,7 @@ def main() -> int:
             users.append(use_users[i])
             label.append(user_label_dict[use_users[i]])
     print('number of complete instances: ' + str(len(files)))
-    
+
     counter = 0
     num_add = 100000
     subject_label = np.zeros([num_add,])
@@ -384,7 +387,7 @@ def main() -> int:
 
     unique_subjects = list(np.unique(subject_label))
     print('number of subjects: ' + str(len(unique_subjects)))
-    
+
     auc_rounds_rf = []
     auc_rounds_nn = []
     fold_counter = 1
@@ -460,7 +463,7 @@ def main() -> int:
             predictions_distances = distance.cdist(
                 test_embedding,
                 np.reshape(pos_mean, [1,len(pos_mean)]), metric='cosine',
-            )   
+            )
 
             # rf with features
             print('evaluate RF on features')
@@ -527,12 +530,12 @@ def main() -> int:
             fold_counter +=1
         auc_rounds_rf.append(aucs_rf)
         auc_rounds_nn.append(aucs_nn)
-    
+
     # save to file
     joblib.dump({'auc_rounds_rf':auc_rounds_rf,
                  'auc_rounds_nn':auc_rounds_nn,
                  }, result_save_path, compress=3, protocol=2)
-                 
+
     return 0
 
 

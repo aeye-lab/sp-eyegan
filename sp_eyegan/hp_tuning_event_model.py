@@ -1,16 +1,19 @@
-import os
-import numpy as np
-import random
-from tqdm import tqdm
-import sys
-import joblib
-import argparse
-import pandas as pd
+from __future__ import annotations
 
+import argparse
+import os
+import random
+import sys
+
+import joblib
+import numpy as np
+import pandas as pd
+import pymovements as pm
 import tensorflow
 import tensorflow as tf
-from Model import eventGAN as eventGAN
-import pymovements as pm
+from tqdm import tqdm
+
+from sp_eyegan.model import eventGAN as eventGAN
 
 
 
@@ -18,36 +21,36 @@ def main():
     # global params
     data_dir = 'data/'
     verbose = 1
-    
+
     parser = argparse.ArgumentParser()
     parser.add_argument('-GPU','--GPU',type=int,default=0)
     parser.add_argument('-model_dir','--model_dir',type=str,default='event_model/')
     parser.add_argument('-event_type','--event_type',type=str,default='fixation')
     parser.add_argument('-stimulus','--stimulus',type=str,default='text')
     parser.add_argument('-result_dir','--result_dir',type=str,default='results/')
-    
+
     args = parser.parse_args()
-    
+
     GPU = args.GPU
     model_dir = args.model_dir
     event_type = args.event_type
     stimulus = args.stimulus
     result_dir = args.result_dir
-    
+
     if GPU != -1:
         flag_train_on_gpu = True
     else:
         flag_train_on_gpu = False
-    
+
     BUFFER_SIZE = 60000
     BATCH_SIZE = 256
-    
+
     # set up GPU
     if flag_train_on_gpu:
         import tensorflow as tf
         # select graphic card
-        os.environ["CUDA_VISIBLE_DEVICES"] = str(GPU)
-        os.environ["CUDA_DEVICE_ORDER"] = "PCI_BUS_ID"
+        os.environ['CUDA_VISIBLE_DEVICES'] = str(GPU)
+        os.environ['CUDA_DEVICE_ORDER'] = 'PCI_BUS_ID'
         config = tf.compat.v1.ConfigProto(log_device_placement=True)
         config.gpu_options.per_process_gpu_memory_fraction = 1.
         config.gpu_options.allow_growth = True
@@ -56,15 +59,15 @@ def main():
         import tensorflow as tf
         # select graphic card
         os.environ['CUDA_VISIBLE_DEVICES'] = '-1'
-    
+
     if event_type == 'fixation':
         data = np.load(data_dir + 'fixation_matrix_gazebase_vd_' + stimulus + '.npy')
         save_path = model_dir + 'fixation_model_' + stimulus
     elif event_type == 'saccade':
         data = np.load(data_dir + 'saccade_matrix_gazebase_vd_' + stimulus + '.npy')
         save_path = model_dir + 'saccade_model_' + stimulus
-    
-    
+
+
     hp_path = result_dir + event_type + '_hp.csv'
     if os.path.exists(hp_path):
         hp_data = pd.read_csv(hp_path)
@@ -72,21 +75,21 @@ def main():
         hp_data = {'model_name':[],
                    'event_acc':[],
                   }
-    
+
     model_names = set(list(hp_data['model_name']))
-    
+
     # load data
     column_dict = joblib.load(data_dir + 'column_dict.joblib')
-    
-        
+
+
     data[data == -1] = 0.
-    
+
     # create train data
     train_dataset = tf.data.Dataset.from_tensor_slices(data[:,:,4:6]).shuffle(BUFFER_SIZE).batch(BATCH_SIZE)
-    
-    
+
+
     window_size = data.shape[1]
-    
+
     while True:
         while True:
             # create config
@@ -148,22 +151,22 @@ def main():
             if cur_model_name not in model_names:
                 save_path += '_' + cur_model_name
                 break
-        
+
         model = eventGAN.eventGAN(model_config)
-    
-    
+
+
 
 
         EPOCHS = 100
         noise_dim = random_size
         num_examples_to_generate = 16
-    
+
         # train model
         gen_loss_list, disc_loss_list = model.train(train_dataset, EPOCHS, verbose = verbose)
-            
+
         # save model
         model.save_model(save_path)
-        
+
         if os.path.exists(hp_path):
             hp_data_pd = pd.read_csv(hp_path)
             hp_data = {'model_name':list(hp_data_pd['model_name']),
@@ -173,7 +176,7 @@ def main():
             hp_data = {'model_name':[],
                        'event_acc':[],
                       }
-        
+
         # create synthetic data
         sample_instances = 1000
         num_iter = int(np.ceil(sample_instances / model_config['batch_size']))
@@ -182,7 +185,7 @@ def main():
             noise = tf.random.normal([model_config['batch_size'], model_config['random_size']])
             syn_data = model.generator(noise)
             out_data[i*model_config['batch_size']:(i+1)*model_config['batch_size'],:,:] = syn_data
-        
+
         # load data for other event
         if event_type == 'fixation':
             other_event_data = np.load(data_dir + 'saccade_matrix_gazebase_vd_' + stimulus + '.npy')
@@ -190,7 +193,7 @@ def main():
         elif event_type == 'saccade':
             other_event_data = np.load(data_dir + 'fixation_matrix_gazebase_vd_' + stimulus + '.npy')
             other_event_data = other_event_data[:,:,4:6]
-        
+
         num_add = out_data.shape[0]
         scaling = 1000.
 
@@ -238,7 +241,7 @@ def main():
 
         event_acc_detect = np.sum(zero_syn == detect_seq[zero_ids]) / zero_syn.shape[0]
         print('accuracy event: ' + str(event_acc_detect))
-        
+
         if os.path.exists(hp_path):
             hp_data_pd = pd.read_csv(hp_path)
             hp_data = {'model_name':list(hp_data_pd['model_name']),
@@ -248,11 +251,11 @@ def main():
             hp_data = {'model_name':[],
                        'event_acc':[],
                       }
-        
+
         hp_data['model_name'].append(cur_model_name)
         hp_data['event_acc'].append(event_acc_detect)
         pd.DataFrame(hp_data).to_csv(hp_path, index=False)
-        
-if __name__ == "__main__":
+
+if __name__ == '__main__':
     # execute only if run as a script
-    main() 
+    raise SystemExit(main())

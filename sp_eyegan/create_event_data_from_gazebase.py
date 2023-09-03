@@ -1,24 +1,24 @@
-import sys
-import os
-import joblib
-import numpy as np
-import random
-import sys
-import seaborn as sns
-import pandas as pd
-from tqdm import tqdm
-from sklearn import metrics
-import socket
+from __future__ import annotations
+
 import argparse
-
 import math
-import matplotlib.pyplot as plt
-from Preprocessing import data_loader as data_loader
-from Preprocessing import event_detection as event_detection
-from Preprocessing import smoothing as smoothing
+import os
+import random
+import socket
+import sys
 
+import joblib
+import matplotlib.pyplot as plt
+import numpy as np
+import pandas as pd
+import seaborn as sns
+from sklearn import metrics
+from tqdm import tqdm
 
 import config as config
+from sp_eyegan.preprocessing import data_loader as data_loader
+from sp_eyegan.preprocessing import event_detection as event_detection
+from sp_eyegan.preprocessing import smoothing as smoothing
 
 def list_string(s):
     split_string = s.split(',')
@@ -38,7 +38,7 @@ def list_int(s):
 def main():
     # gloabal params
     sampling_rate = 1000
-    
+
     # params
     pp_params=(None, 6)
     minDurFix=20
@@ -65,7 +65,7 @@ def main():
     parser.add_argument('-sac_window_size', '--sac_window_size', type=int, default=30)
     parser.add_argument('-fix_window_size', '--fix_window_size', type=int, default=100)
     parser.add_argument('-stimulus', '--stimulus', type=str, default='text')    # video | text | all | fxs | hss | ran
-    
+
     args = parser.parse_args()
     target_sampling_rate = args.target_sampling_rate
     stimulus = args.stimulus
@@ -83,17 +83,19 @@ def main():
         use_trial_types = ['TEX','VD1','VD2','BLG','FXS','HSS','RAN']
     sac_window_size=args.sac_window_size
     fix_window_size=args.fix_window_size
-    
-    
-    
-    gaze_data_list, gaze_feature_dict, gaze_label_matrix, gaze_label_dict = data_loader.load_gazebase_data(gaze_base_dir = config.gaze_base_dir,
-                            use_trial_types = use_trial_types,
-                            number_train = -1,
-                            max_round = 9,
-                            target_sampling_rate = target_sampling_rate,
-                            sampling_rate = sampling_rate)
-    
-    
+
+
+
+    gaze_data_list, gaze_feature_dict, gaze_label_matrix, gaze_label_dict = data_loader.load_gazebase_data(
+        gaze_base_dir=config.GAZE_BASE_DIR,
+        use_trial_types=use_trial_types,
+        number_train=-1,
+        max_round=9,
+        target_sampling_rate=target_sampling_rate,
+        sampling_rate=sampling_rate,
+    )
+
+
     event_df_list = []
     list_dicts_list = []
     for i in tqdm(np.arange(len(gaze_data_list)),disable = disable):
@@ -128,7 +130,7 @@ def main():
 
         corrupt[corrupt_vels] = 1
 
-        
+
         # dispersion
         list_dicts, event_df = event_detection.get_sacc_fix_lists_dispersion(
                                                         x_smo, y_smo,
@@ -145,8 +147,8 @@ def main():
         list_dicts_list.append(list_dicts)
 
     print('number of lists: ' + str(len(event_df_list)))
-    
-    
+
+
     fixation_list = []
     saccade_list  = []
     for i in tqdm(np.arange(len(event_df_list))):
@@ -171,7 +173,7 @@ def main():
         vel   = smooth_vals['vel']
         acc_x = smooth_vals['acc_x']
         acc_y = smooth_vals['acc_y']
-        acc   = smooth_vals['acc']    
+        acc   = smooth_vals['acc']
 
         for f_i in range(len(fixations)):
             fixation_list.append(np.concatenate([
@@ -195,7 +197,7 @@ def main():
 
     print('number of fixations: ' + str(len(fixation_list)))
     print('number of saccades: ' + str(len(saccade_list)))
-    
+
     filtered_fixation_list = []
     for f_i in tqdm(np.arange(len(fixation_list))):
         cur_x_dva = fixation_list[f_i][:,0]
@@ -209,8 +211,8 @@ def main():
             continue
         filtered_fixation_list.append(fixation_list[f_i])
     print('number of fixations after filtering: ' + str(len(filtered_fixation_list)))
-    
-    
+
+
     filtered_saccade_list = []
     for s_i in tqdm(np.arange(len(saccade_list))):
         cur_len = saccade_list[s_i].shape[0]
@@ -224,8 +226,8 @@ def main():
 
     print('number of fixations: ' + str(len(filtered_fixation_list)))
     print('number of saccades:  ' + str(len(filtered_saccade_list)))
-    
-    
+
+
     # store fixations and saccades
     column_dict = {'x_dva': 0,
                    'y_dva':1,
@@ -235,7 +237,7 @@ def main():
                    'y_dva_vel':5,
                   }
 
-    joblib.dump(column_dict,'data/column_dict.joblib',compress=3,protocol=2)    
+    joblib.dump(column_dict,'data/column_dict.joblib',compress=3,protocol=2)
 
     fix_lens = [filtered_fixation_list[a].shape[0] for a in range(len(filtered_fixation_list))]
     sac_lens = [filtered_saccade_list[a].shape[0] for a in range(len(filtered_saccade_list))]
@@ -254,11 +256,11 @@ def main():
     for i in tqdm(np.arange(len(filtered_saccade_list))):
         cur_sac_len = np.min([max_sac_len,filtered_saccade_list[i].shape[0]])
         saccade_matrix[i,0:cur_sac_len,:] = filtered_saccade_list[i][0:cur_sac_len,:]
-    
-    
+
+
     np.save('data/fixation_matrix_gazebase_vd_' + stimulus,fixation_matrix)
     np.save('data/saccade_matrix_gazebase_vd_' + stimulus,saccade_matrix)
-    
-if __name__ == "__main__":
+
+if __name__ == '__main__':
     # execute only if run as a script
-    main()
+    raise SystemExit(main())

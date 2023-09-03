@@ -7,7 +7,10 @@ import random
 import numpy as np
 import pandas as pd
 import tensorflow as tf
+from scipy.spatial import distance
+from sklearn.ensemble import RandomForestClassifier
 from sklearn.metrics import roc_auc_score
+from sklearn.model_selection import GridSearchCV
 from sklearn.model_selection import KFold
 from sklearn.preprocessing import StandardScaler
 from tensorflow.keras.callbacks import EarlyStopping
@@ -15,13 +18,10 @@ from tensorflow.keras.layers import Dense
 from tensorflow.keras.models import Model
 from tensorflow.keras.optimizers import Adam
 
-from gpu_selection import select_gpu
-from load_sb_sat_data import get_sb_sat_data
-from Model import contrastive_learner
 import config
-from sklearn.ensemble import RandomForestClassifier
-from sklearn.model_selection import GridSearchCV
-from scipy.spatial import distance
+from sp_eyegan.gpu_selection import select_gpu
+from sp_eyegan.load_sb_sat_data import get_sb_sat_data
+from sp_eyegan.model import contrastive_learner
 
 
 def help_roc_auc(y_true, y_pred):
@@ -96,7 +96,7 @@ def get_argument_parser() -> argparse.Namespace:
     parser.add_argument('--print-model-summary', action='store_true')
     parser.add_argument('--normalization', action='store_true')
     parser.add_argument('--models-batch', type=int)
-    
+
     parser.add_argument('--pretrain_augmentation_mode', type=str, default=None)#'random')
     parser.add_argument('--pretrain_stimulus', type=str, default='text')
     parser.add_argument('--pretrain_encoder_name', type=str, default='ekyt')
@@ -113,8 +113,8 @@ def get_argument_parser() -> argparse.Namespace:
     parser.add_argument('--pretrain_model_path', type=str, default=None)
     parser.add_argument('--inner_cv_loops', type=int, default=2)
     parser.add_argument('--fine_tune', type=int, default=1)
-    
-    
+
+
     parser.add_argument(
         '--problem-setting', type=str, default='native',
         choices=['acc', 'difficulty', 'subj_acc', 'native'],
@@ -134,7 +134,7 @@ def configure_gpu(args: argparse.Namespace) -> None:
 
 def save_model(model,
                model_path,
-              ):    
+              ):
     model.save_weights(
             model_path,
         )
@@ -148,15 +148,15 @@ def load_weights(model,
 
 def get_model(args: argparse.Namespace) -> Model:
     print(' === Loading model ===')
-    
-    if args.pretrain_model_path is None:        
+
+    if args.pretrain_model_path is None:
         contrastive_augmentation = {
             'window_size': args.window_size,
             'channels': args.channels,
             'name': 'random',
             'sd': args.sd,
         }
-        
+
         # load contrastive pretrained model
         pretraining_model = contrastive_learner.ContrastiveModel(
             temperature=args.temperature,
@@ -182,7 +182,7 @@ def get_model(args: argparse.Namespace) -> Model:
                 inputs=pretraining_model.encoder.get_layer('velocity_input').input,
                 outputs=[dense_out], name='classifier',
     )
-    
+
     if args.pretrain_model_path is not None:
         print('load weights from: ' + str(args.pretrain_model_path))
         classification_model = load_weights(classification_model, args.pretrain_model_path)
@@ -221,7 +221,7 @@ def four_problem_setting_eval_on_sb(args: argparse.Namespace) -> int:
         random.seed(12)
         tf.random.set_seed(12)
         if args.pretrained_model_name:
-            model_name = args.pretrained_model_name.split('/')[-1]        
+            model_name = args.pretrained_model_name.split('/')[-1]
         else:
             raise NotImplementedError
         for fold, (train_idx, test_idx) in enumerate(kfold.split(split_criterion)):
@@ -292,13 +292,13 @@ def four_problem_setting_eval_on_sb(args: argparse.Namespace) -> int:
 
             # train model
             model = get_model(args)
-            
+
             # get feature extractions
             embedding_model = Model(
                 inputs=model.input,
                 outputs=model.get_layer('dense').output,
             )
-            
+
             test_embedding = embedding_model.predict(
                 X_test,
                 batch_size=args.batch_size,
@@ -308,36 +308,36 @@ def four_problem_setting_eval_on_sb(args: argparse.Namespace) -> int:
                 X_train,
                 batch_size=args.batch_size,
             )
-            
-            
+
+
             print('evaluate zero-shot (distance based)')
             pos_train_ids = np.where(y_train == 1)[0]
             pos_mean = np.mean(train_embedding[pos_train_ids], axis=0)
-            
+
             predictions_distances = distance.cdist(
                 test_embedding,
                 np.reshape(pos_mean, [1,len(pos_mean)]), metric='cosine',
             )
-            
+
             # rf with features
             print('evaluate RF on features')
             grid_search_verbosity = 1
-            param_grid = { 
+            param_grid = {
                 'n_estimators': [500, 1000],
                 'max_features': ['sqrt', 'log2'],
                 'max_depth' : [2,4,8,16,32, None],
                 'criterion' :['entropy'],
                 'n_jobs': [-1]
             }
-                
+
             # rf
             rf = GridSearchCV(estimator=RandomForestClassifier(), param_grid=param_grid, verbose = grid_search_verbosity, cv = args.inner_cv_loops)
             rf.fit(train_embedding, y_train.ravel())
-            
+
             best_parameters = rf.best_params_
             predictions_rf = rf.predict_proba(test_embedding)
-            
-            
+
+
             optimizer = Adam(learning_rate=args.learning_rate)
             model.compile(
                 optimizer=optimizer,
@@ -366,48 +366,48 @@ def four_problem_setting_eval_on_sb(args: argparse.Namespace) -> int:
                 batch_size=args.batch_size,
             )
             predictions_nn = model.predict(X_test)
-            
+
             #print(np.unique(model.predict(X_test), return_counts=True))
-            
+
             # NN results
             five_sec_eval_auc = roc_auc_score(y_test_ps, predictions_nn)
             five_sec_eval_aucs[fold] = five_sec_eval_auc
             trained_auc = get_auc_for_full_page(
                 predictions_nn, X_test, X_test_screen_id, y_test_ps, y_test, N_test_split,
             )
-            trained_aucs[fold] = trained_auc            
+            trained_aucs[fold] = trained_auc
             results_dict['model_name'] = model_name + '_fine-tune'
             results_dict[f'{problem_setting}_auc_fold_{fold}'] = trained_auc
             results_dict[f'{problem_setting}_five_sec_eval_auc_fold_{fold}'] = five_sec_eval_auc
             results_dict[f'{problem_setting}_mean_auc'] = np.mean(list(trained_aucs.values()))
             results_dict[f'{problem_setting}_five_sec_eval_mean_auc'] = np.mean(list(five_sec_eval_aucs.values()))
-            
+
             # distance results
             five_sec_eval_auc = roc_auc_score(y_test_ps, predictions_distances)
             five_sec_eval_aucs_distance[fold] = five_sec_eval_auc
             trained_auc = get_auc_for_full_page(
                 predictions_distances, X_test, X_test_screen_id, y_test_ps, y_test, N_test_split,
             )
-            trained_aucs_distance[fold] = trained_auc            
+            trained_aucs_distance[fold] = trained_auc
             results_distance['model_name'] = model_name + '_distance'
             results_distance[f'{problem_setting}_auc_fold_{fold}'] = trained_auc
             results_distance[f'{problem_setting}_five_sec_eval_auc_fold_{fold}'] = five_sec_eval_auc
             results_distance[f'{problem_setting}_mean_auc'] = np.mean(list(trained_aucs_distance.values()))
             results_distance[f'{problem_setting}_five_sec_eval_mean_auc'] = np.mean(list(five_sec_eval_aucs_distance.values()))
-            
+
             # rf results
             five_sec_eval_auc = roc_auc_score(y_test_ps, predictions_rf[:,1])
             five_sec_eval_aucs_rf[fold] = five_sec_eval_auc
             trained_auc = get_auc_for_full_page(
                 predictions_rf[:,1], X_test, X_test_screen_id, y_test_ps, y_test, N_test_split,
             )
-            trained_aucs_rf[fold] = trained_auc            
+            trained_aucs_rf[fold] = trained_auc
             results_rf['model_name'] = model_name + '_rf'
             results_rf[f'{problem_setting}_auc_fold_{fold}'] = trained_auc
             results_rf[f'{problem_setting}_five_sec_eval_auc_fold_{fold}'] = five_sec_eval_auc
             results_rf[f'{problem_setting}_mean_auc'] = np.mean(list(trained_aucs_rf.values()))
             results_rf[f'{problem_setting}_five_sec_eval_mean_auc'] = np.mean(list(five_sec_eval_aucs_rf.values()))
-            
+
             '''
             print(f'{five_sec_eval_aucs.values()}')
             print(f'{trained_aucs.values()}')
@@ -422,7 +422,7 @@ def four_problem_setting_eval_on_sb(args: argparse.Namespace) -> int:
             if args.base_model:
                 model_name = 'base_model_' + model_name
             '''
-            
+
             #model.save_weights(
             #    config.TRAINED_CLASSIFICATION_MODELS_DIR,
             #)
@@ -453,15 +453,15 @@ def four_problem_setting_eval_on_sb(args: argparse.Namespace) -> int:
 
 
 def main() -> int:
-    args = get_argument_parser()  
+    args = get_argument_parser()
     print(' === Configuring GPU ===')
-    
+
     if args.gpu == -1:
         args.gpu = select_gpu(7700)
     print('~' * 79)
     print(f'{args.gpu=}')
     print('~' * 79)
-    
+
     configure_gpu(args)
     if args.pretrain_model_path is None:
         if args.fine_tune != 0:
@@ -477,7 +477,7 @@ def main() -> int:
                 args.embedding_size = 512
             elif args.encoder_name == 'ekyt':
                 args.embedding_size = 128
-            
+
     else:
         if args.encoder_name == 'clrgaze':
             args.embedding_size = 512
@@ -492,7 +492,7 @@ def main() -> int:
             args.pretrained_model_name = 'CLRGAZE'
         elif args.encoder_name == 'ekyt':
             args.pretrained_model_name = 'EKYT'
-        
+
     print(f'evaluating {args.pretrained_model_name=}'.center(79, '~'))
     four_problem_setting_eval_on_sb(args)
     return 0

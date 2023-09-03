@@ -1,42 +1,43 @@
-import os
-import numpy as np
-import random
-from tqdm import tqdm
-import sys
-import joblib
-import seaborn as sns
-import pandas as pd
+from __future__ import annotations
+
 import argparse
-import tensorflow
+import os
+import random
+import sys
+
+import joblib
+import numpy as np
+import pandas as pd
 import pymovements as pm
+import seaborn as sns
+import tensorflow
 import tensorflow as tf
-from tensorflow.keras.losses import CategoricalCrossentropy
-from tensorflow.keras.callbacks import LearningRateScheduler
+from scipy import interpolate
+from scipy.spatial import distance
+from sklearn.preprocessing import LabelEncoder
+from tensorflow import keras
 from tensorflow.keras.callbacks import EarlyStopping
+from tensorflow.keras.callbacks import LearningRateScheduler
 from tensorflow.keras.layers import Activation
 from tensorflow.keras.layers import AveragePooling1D
-from tensorflow.keras.layers import GlobalAveragePooling1D
 from tensorflow.keras.layers import BatchNormalization
 from tensorflow.keras.layers import Concatenate
 from tensorflow.keras.layers import Conv1D
 from tensorflow.keras.layers import Dense
 from tensorflow.keras.layers import Flatten
+from tensorflow.keras.layers import GlobalAveragePooling1D
 from tensorflow.keras.layers import Input
 from tensorflow.keras.layers import Layer
+from tensorflow.keras.losses import CategoricalCrossentropy
 from tensorflow.keras.models import clone_model
 from tensorflow.keras.models import Model
-from tensorflow import keras
-import config as config
-from scipy import interpolate
-from scipy.spatial import distance
-from sklearn.preprocessing import LabelEncoder
 from tensorflow.keras.utils import to_categorical
+from tqdm import tqdm
 
-
-from tensorflow.keras.models import Model
-from Preprocessing import data_loader as data_loader
-from Model import contrastive_learner as contrastive_learner
-from gpu_selection import select_gpu
+import config as config
+from sp_eyegan.gpu_selection import select_gpu
+from sp_eyegan.model import contrastive_learner as contrastive_learner
+from sp_eyegan.preprocessing import data_loader as data_loader
 
 
 
@@ -249,12 +250,12 @@ def get_user_similarity_scores_and_labels(
                 labels.append(label)
                 person_one.append(enrolled_user)
                 person_two.append(test_user)
-                
+
     not_nan_ids = np.where(np.isnan(scores) == 0)[0]
     return np.array(scores)[not_nan_ids], np.array(labels)[not_nan_ids], np.array(person_one)[not_nan_ids], np.array(person_two)[not_nan_ids]
 
 def get_scores_and_labels(
-    test_embeddings, 
+    test_embeddings,
     test_user, #
     test_sessions, # session
     test_seqIds, # round
@@ -271,7 +272,7 @@ def get_scores_and_labels(
     seconds_per_session=None,
     num_enrollment = 12,
     ):
-    
+
     if random_state is not None:
         random.seed(random_state)
 
@@ -358,7 +359,7 @@ def get_scores_and_labels(
 
 def save_model(model,
                model_path,
-              ):    
+              ):
     model.save_weights(
             model_path,
         )
@@ -385,7 +386,7 @@ def get_biometric_model(encoder_name,
         embedding_size = 512
     elif encoder_name == 'ekyt':
         embedding_size = 128
-    
+
     contrastive_augmentation = {'window_size': window_size, 'channels':channels, 'name':'random','sd':sd}
     pretraining_model = contrastive_learner.ContrastiveModel(temperature=temperature,
                                                     embedding_size = embedding_size,
@@ -393,15 +394,15 @@ def get_biometric_model(encoder_name,
                                                     channels = channels,
                                                     window_size = window_size,
                                                     encoder_name = encoder_name)
-    
+
     embedding = Model(
             inputs=pretraining_model.get_layer('encoder').input,
             outputs=pretraining_model.get_layer('encoder').output,
         )
-    
+
     input_nn = embedding.input
     dense = embedding.layers[-1].output
-    
+
     # add biometric classification head
     bn_final = BatchNormalization(axis=-1, name='bn_final')(dense)
     a_final = Activation('relu', name='a_final')(bn_final)
@@ -429,7 +430,7 @@ def get_biometric_model(encoder_name,
                 loss = LossFunc, loss_weights=lossWeights, metrics=['accuracy'],
                 run_eagerly = True,
             )
-    
+
     if model_path is not None:
         ekyt_model = load_weights(ekyt_model, model_path)
     return ekyt_model
@@ -448,7 +449,7 @@ def get_biometric_model(encoder_name,
 def create_batch(X,y,batchsize = 256):
     num_subjects = int(np.ceil(np.sqrt(batchsize)))
     num_events = num_subjects
-    
+
     #print(y.shape)
     y_idx = np.argmax(y,axis=1)
     #print(y_idx)
@@ -472,7 +473,7 @@ def create_batch(X,y,batchsize = 256):
     return X_out,y_out
 
 
-def generate_data(X,y, batchsize = 256):    
+def generate_data(X,y, batchsize = 256):
     while True:
         X_out,y_out = create_batch(X,y, batchsize = batchsize)
         yield (X_out,y_out)
@@ -490,17 +491,17 @@ def ms_loss(labels, embeddings, alpha=2.0, beta=50.0, lamb=0.5, eps=0.1, ms_mini
     ref: http://openaccess.thecvf.com/content_CVPR_2019/papers/Wang_Multi-Similarity_Loss_With_General_Pair_Weighting_for_Deep_Metric_Learning_CVPR_2019_paper.pdf
     official codes: https://github.com/MalongTech/research-ms-loss
     '''
-    
+
     # convert labels to index vector containing the label
     labels = tf.argmax(labels, axis=1)
-    
+
     #tf.print(labels.shape)
     #tf.print(embeddings.shape)
-    
+
     # make sure emebedding should be l2-normalized
     embeddings = tf.nn.l2_normalize(embeddings, axis=1)
     labels = tf.reshape(labels, [-1, 1])
-    
+
     #tf.print(labels.shape)
     #tf.print(embeddings.shape)
 
@@ -508,7 +509,7 @@ def ms_loss(labels, embeddings, alpha=2.0, beta=50.0, lamb=0.5, eps=0.1, ms_mini
 
     adjacency = tf.equal(labels, tf.transpose(labels))
     adjacency_not = tf.logical_not(adjacency)
-    
+
     #tf.print(adjacency)
 
     mask_pos = tf.cast(adjacency, dtype=tf.float32) - tf.eye(batch_size, dtype=tf.float32)
@@ -554,7 +555,7 @@ def cat_crossentropy(y_true, y_pred):
     crossentropy = loss_function(y_true,y_pred)
     #crossentropy = tf.reduce_mean(tf.keras.metrics.categorical_crossentropy(y_true, y_pred))
     #tf.print(crossentropy)
-    #tf.print(crossentropy.shape)           
+    #tf.print(crossentropy.shape)
     return crossentropy
 
 ###########################################################
@@ -579,7 +580,7 @@ def ekyt_learning_rate_scheduler(max_lr = 1e-2,first_steps = 30, max_epochs = 10
         step += 1
         #print(step)
         if step < first_steps:
-            val = decayed_learning_rate(step=first_steps-step, 
+            val = decayed_learning_rate(step=first_steps-step,
                                          decay_steps=first_steps,initial_learning_rate=max_lr)
             print('lr: ' + str(val) + ' [max_lr: ' + str(max_lr) + ']')
             return val
@@ -605,7 +606,7 @@ def get_argument_parser() -> argparse.Namespace:
     parser.add_argument('--stimulus', type=str, default='TEX')
     parser.add_argument('--dataset_name', type=str, default='gazebase')
     parser.add_argument('--encoder_name', type=str, default='ekyt')
-    
+
     parser.add_argument('--pretrain_augmentation_mode', type=str, default=None)#'random')
     parser.add_argument('--pretrain_stimulus', type=str, default='text')
     parser.add_argument('--pretrain_encoder_name', type=str, default='ekyt')
@@ -620,7 +621,7 @@ def get_argument_parser() -> argparse.Namespace:
     parser.add_argument('--pretrain_checkpoint', type=int, default=-1)
     parser.add_argument('--pretrain_data_suffix', type=str, default='')
     parser.add_argument('--pretrain_model_path', type=str, default=None)
-    
+
     parser.add_argument('--result_dir', type=str, default='results/')
     parser.add_argument('--gpu', type=int, default=-1)
     parser.add_argument('--num_train_user', type=int, default=100)
@@ -638,16 +639,16 @@ def get_argument_parser() -> argparse.Namespace:
 
 def main() -> int:
     args = get_argument_parser()
-    
+
     print(' === Configuring GPU ===')
-    
+
     if args.gpu == -1:
         args.gpu = select_gpu(7700)
     print('~' * 79)
     print(f'{args.gpu=}')
     print('~' * 79)
-    
-    
+
+
     # get params
     stimulus = args.stimulus
     dataset_name = args.dataset_name
@@ -675,16 +676,16 @@ def main() -> int:
     pretrain_checkpoint = args.pretrain_checkpoint
     pretrain_data_suffix = args.pretrain_data_suffix
     max_rounds = args.max_rounds
-    
-    
+
+
     if fold == -1:
         folds = list(np.arange(args.n_folds, dtype=np.int32))
     else:
         folds = [fold]
-    
+
     for cur_fold in folds:
         args.fold = cur_fold
-    
+
         if args.pretrain_model_path is None:
             if args.fine_tune != 0:
                 pretrain_model_dir = config.CONTRASTIVE_PRETRAINED_MODELS_DIR
@@ -704,9 +705,9 @@ def main() -> int:
                 args.embedding_size = 512
             elif args.encoder_name == 'ekyt':
                 args.embedding_size = 128
-                
+
         model_path = args.pretrain_model_path
-        
+
         # create dummy augmentation
         args.contrastive_augmentation = {'window_size': args.pretrain_window_size, 'channels':args.pretrain_channels, 'name':'random','sd':args.pretrain_sd}
         if args.pretrain_model_path is not None:
@@ -718,18 +719,18 @@ def main() -> int:
                 args.pretrained_model_name = 'EKYT'
         result_save_path = result_dir + str(args.pretrained_model_name) + '_fold' + str(args.fold) + '_biometric_' + '_dataset_' + str(dataset_name) +\
                             '.joblib'
-                            
+
         if max_rounds != -1:
             result_save_path = result_save_path.replace('.joblib','_max_rounds' + str(max_rounds) + '.joblib')
-        
+
         result_save_path = result_save_path.replace('.joblib','_num_folds' + str(args.n_folds) + '.joblib')
-        
-        
+
+
         if not flag_redo and os.path.exists(result_save_path):
             print('skip evaluation (already exists)')
             return 0
-        
-        
+
+
         # params
         loss_weight_ce = 0.1
         loss_ms = 1.
@@ -737,19 +738,19 @@ def main() -> int:
         batch_size = args.batch_size
         epochs = 100
         temperature = 0.1
-        
+
         # biometric eval params
         n_train_users = 0
         n_enrolled_users = -1
         n_impostors = 0
         window_sizes = [1,2,12]
-        
+
         configure_gpu(args)
-        
+
         if dataset_name == 'gazebase':
             # load gazebase data
-            dataset = pm.Dataset("GazeBase", path=config.GAZE_BASE_DIR)
-            
+            dataset = pm.Dataset('GazeBase', path=config.GAZE_BASE_DIR)
+
             if max_rounds == -1:
                 subset = {
                     #'subject_id': list(np.arange(100,dtype=np.int32)),
@@ -767,8 +768,8 @@ def main() -> int:
             except:
                 dataset.download()
                 dataset.load()
-            
-            
+
+
             num_pairs = len(dataset.gaze)
             counter = 0
             num_add = 100000
@@ -797,7 +798,7 @@ def main() -> int:
             round_ids = round_ids[0:counter]
             subject_ids = subject_ids[0:counter]
             session_ids = session_ids[0:counter]
-            
+
             unique_user = list(np.unique(subject_ids))
             print('number of unique_users: ' + str(len(unique_user)))
             np.random.seed(args.fold)
@@ -818,7 +819,7 @@ def main() -> int:
             test_sessions  = np.array(session_ids)[test_ids]
             train_data     = gaze_seq_data[train_ids]
             test_data      = gaze_seq_data[test_ids]
-            
+
             # create training data
             orig_data = train_data
             orig_sub  = np.array(train_subjects, dtype=np.int32)
@@ -839,18 +840,18 @@ def main() -> int:
             skf = StratifiedKFold(n_splits=4, shuffle=True, random_state=42)
             for train_idx, validation_idx in skf.split(orig_data, sub_transformed):
                 break
-        
+
         elif dataset_name == 'judo':
-            dataset = pm.Dataset("JuDo1000", path=config.JUDO_BASE_DIR)
-            try:    
+            dataset = pm.Dataset('JuDo1000', path=config.JUDO_BASE_DIR)
+            try:
                 dataset.load()
             except:
                 dataset.download()
                 dataset.load()
-            
+
             # convert pixel data to degrees of visual angle
             dataset.pix2deg()
-            
+
             num_pairs = len(dataset.gaze)
             counter = 0
             num_add = 100000
@@ -863,7 +864,7 @@ def main() -> int:
                                                     window=5000,
                                                     max_vel=.5,
                                                     )
-                
+
                 cur_len = cur_cut_data.shape[0]
                 while counter + cur_len > gaze_seq_data.shape[0]:
                     gaze_seq_data = np.concatenate([gaze_seq_data, np.zeros([num_add,5000,2])], axis=0)
@@ -876,8 +877,8 @@ def main() -> int:
             gaze_seq_data = gaze_seq_data[0:counter]
             subject_ids = subject_ids[0:counter]
             session_ids = session_ids[0:counter]
-            
-            
+
+
             unique_user = list(np.unique(subject_ids))
             print('number of unique_users: ' + str(len(unique_user)))
             np.random.seed(args.fold)
@@ -888,8 +889,8 @@ def main() -> int:
             test_ids   = np.where(np.isin(np.array(subject_ids), test_user))[0]
             print('number train instances: ' + str(len(train_ids)))
             print('number test instances: ' + str(len(test_ids)))
-            
-            
+
+
             train_subjects = np.array(subject_ids)[train_ids]
             test_subjects  = np.array(subject_ids)[test_ids]
             train_sessions = np.array(session_ids)[train_ids]
@@ -917,7 +918,7 @@ def main() -> int:
             skf = StratifiedKFold(n_splits=4, shuffle=True, random_state=42)
             for train_idx, validation_idx in skf.split(orig_data, sub_transformed):
                 break
-            
+
         # get model
         biometric_model = get_biometric_model(encoder_name = encoder_name,
                                     model_path = model_path,
@@ -925,20 +926,20 @@ def main() -> int:
                                     temperature = temperature,
                                     learning_rate = learning_rate,
                                     )
-        
+
         # get zero-shot embedding
         embedding_model = Model(
             inputs=biometric_model.input,
             #outputs=biometric_model.get_layer('a_final').output,
             outputs=biometric_model.get_layer('dense').output,
         )
-            
+
         embedding_zero_shot = embedding_model.predict(
             test_data,
             batch_size=batch_size,
         )
-        
-        
+
+
         callbacks = [LearningRateScheduler(ekyt_learning_rate_scheduler(max_lr = learning_rate,
                                                         first_steps = 30, max_epochs = 100))]
 
@@ -959,29 +960,29 @@ def main() -> int:
             callbacks=callbacks,
             steps_per_epoch=steps_per_epoch,
             validation_steps=steps_per_val,
-        )    
-        
-        
-        
+        )
+
+
+
         # get embedding for test set
         embedding_model = Model(
             inputs=biometric_model.input,
             #outputs=biometric_model.get_layer('a_final').output,
             outputs=biometric_model.get_layer('dense').output,
         )
-            
+
         embedding = embedding_model.predict(
             test_data,
             batch_size=batch_size,
         )
-        
+
         # evaluate embeddings
         if n_enrolled_users == -1:
             n_enrolled_users = len(np.unique(test_subjects))
-        
+
         if dataset_name == 'gazebase':
             score_dicts, label_dicts, person_one_dicts, person_two_dicts = get_scores_and_labels(
-                test_embeddings = embedding, 
+                test_embeddings = embedding,
                 test_user = np.array(test_subjects), #
                 test_sessions = np.array(test_sessions), # session
                 test_seqIds = np.array(test_rounds), # round
@@ -998,9 +999,9 @@ def main() -> int:
                 seconds_per_session=None,
                 num_enrollment = 1,
                 )
-                
+
             score_dicts_zero_shot, label_dicts_zero_shot, person_one_dicts_zero_shot, person_two_dicts_zero_shot = get_scores_and_labels(
-                test_embeddings = embedding_zero_shot, 
+                test_embeddings = embedding_zero_shot,
                 test_user = np.array(test_subjects), #
                 test_sessions = np.array(test_sessions), # session
                 test_seqIds = np.array(test_rounds), # round
@@ -1017,10 +1018,10 @@ def main() -> int:
                 seconds_per_session=None,
                 num_enrollment = 1,
                 )
-            
+
         elif dataset_name == 'judo':
             score_dicts, label_dicts, person_one_dicts, person_two_dicts = get_scores_and_labels(
-                test_embeddings = embedding, 
+                test_embeddings = embedding,
                 test_user = np.array(test_subjects), #
                 test_sessions = np.array(test_sessions), # session
                 test_seqIds = None, # round
@@ -1037,9 +1038,9 @@ def main() -> int:
                 seconds_per_session=None,
                 num_enrollment = 1,
                 )
-                
+
             score_dicts_zero_shot, label_dicts_zero_shot, person_one_dicts_zero_shot, person_two_dicts_zero_shot = get_scores_and_labels(
-                test_embeddings = embedding_zero_shot, 
+                test_embeddings = embedding_zero_shot,
                 test_user = np.array(test_subjects), #
                 test_sessions = np.array(test_sessions), # session
                 test_seqIds = None, # round
@@ -1056,7 +1057,7 @@ def main() -> int:
                 seconds_per_session=None,
                 num_enrollment = 1,
                 )
-        
+
         # save to files
         joblib.dump({'score_dicts':score_dicts,
                      'label_dicts':label_dicts,
@@ -1070,7 +1071,7 @@ def main() -> int:
                      'embedding_zero_shot':embedding_zero_shot,
                      'test_subjects':test_subjects,
                      }, result_save_path, compress=3, protocol=2)
-        
+
         for window_size in window_sizes:
             np.savez(result_save_path.replace('.joblib','_window_size' + str(window_size)),
                      scores = score_dicts[str(window_size)],
@@ -1082,8 +1083,8 @@ def main() -> int:
                      person_one_zero_shot = person_one_dicts_zero_shot[str(window_size)],
                      person_two_zero_shot = person_two_dicts_zero_shot[str(window_size)],
                     )
-                     
-            '''         
+
+            '''
             joblib.dump({'scores':score_dicts[str(window_size)],
                      'labels':label_dicts[str(window_size)],
                      'person_one':person_one_dicts[str(window_size)],

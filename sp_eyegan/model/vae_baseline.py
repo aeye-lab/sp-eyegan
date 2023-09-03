@@ -1,3 +1,7 @@
+from __future__ import annotations
+
+import time
+
 import numpy as np
 import tensorflow as tf
 from tensorflow.keras import Model
@@ -11,8 +15,6 @@ from tensorflow.keras.layers import Layer
 from tensorflow.keras.layers import Reshape
 from tensorflow.keras.losses import mse
 from tensorflow.keras.metrics import Mean
-
-import time
 
 class Sampling(Layer):
     def call(self, inputs):
@@ -112,7 +114,7 @@ class VAE(Model):
             'rec_loss': self.rec_loss.result(),
             'kl_loss': self.kl_loss.result(),
         }
-    
+
     def train(self, data, epochs, verbose = 0):
         rec_loss_list  = []
         kl_loss_list = []
@@ -134,15 +136,13 @@ class VAE(Model):
                           '    reconstruction loss: ' + str(np.round(rec_loss_list[-1],decimals = 3)) +\
                           '    kl loss: ' + str(np.round(kl_loss_list[-1],decimals = 3)))
         return rec_loss_list, kl_loss_list
-    
-    def save_model(self,model_path = None):        
+
+    def save_model(self,model_path = None):
         self.decoder.save_weights(
                 model_path,
             )
-    
+
     def load_model(self,model_path):
         self.decoder.load_weights(
             model_path
         )
-        
-    

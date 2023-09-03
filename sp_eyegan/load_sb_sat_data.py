@@ -9,7 +9,6 @@ from pymovements.gaze.transforms import pix2deg
 from pymovements.gaze.transforms import pos2vel
 from tqdm import tqdm
 
-
 import config
 
 
@@ -99,7 +98,7 @@ def get_sb_sat_data(window_in_ms: int,
         disable = True
     else:
         disable = False
-        
+
     data_path = config.SB_SAT_DIR_PATH
     csv_dir_path = os.path.join(data_path, 'csvs')
 

@@ -1,1 +1,5 @@
-pymovements==0.0.6
+joblib
+pymovements==0.15.0
+scikit-learn
+seaborn
+tensorflow

@@ -1,44 +1,39 @@
-import sys
-import os
-import joblib
-import numpy as np
-import random
-import sys
-import seaborn as sns
-import pandas as pd
-from tqdm import tqdm
-import socket
+from __future__ import annotations
 
 import math
+import os
+import random
+import socket
+import sys
+
+import joblib
 import matplotlib.pyplot as plt
+import numpy as np
+import pandas as pd
+import seaborn as sns
 import tensorflow as tf
 from tensorflow import keras
 from tensorflow.keras import layers
-
-
-# Define the encoder architecture (EKYT like model)
-from tensorflow.keras.losses import CategoricalCrossentropy
-from tensorflow.keras.callbacks import LearningRateScheduler
 from tensorflow.keras.callbacks import EarlyStopping
+from tensorflow.keras.callbacks import LearningRateScheduler
 from tensorflow.keras.layers import Activation
+from tensorflow.keras.layers import Add
 from tensorflow.keras.layers import AveragePooling1D
-from tensorflow.keras.layers import GlobalAveragePooling1D
 from tensorflow.keras.layers import BatchNormalization
 from tensorflow.keras.layers import Concatenate
 from tensorflow.keras.layers import Conv1D
 from tensorflow.keras.layers import Dense
 from tensorflow.keras.layers import Flatten
+from tensorflow.keras.layers import GlobalAveragePooling1D
 from tensorflow.keras.layers import Input
 from tensorflow.keras.layers import Layer
-from tensorflow.keras.models import clone_model
-from tensorflow.keras.models import Model
-
-
-# Define the encoder architecture CLRGaze
-from tensorflow.keras.layers import Add
 from tensorflow.keras.layers import MaxPooling1D
 from tensorflow.keras.layers import Multiply
 from tensorflow.keras.layers import Reshape
+from tensorflow.keras.losses import CategoricalCrossentropy
+from tensorflow.keras.models import clone_model
+from tensorflow.keras.models import Model
+from tqdm import tqdm
 
 
 # CLRGaze
@@ -249,8 +244,8 @@ def get_encoder_ekyt(embedding_size = 128,
     dense = Dense(
                 embedding_size, activation=None, name='dense',
             )(g_a)
-    
-    
+
+
     ekyt_model = Model(
         inputs=input_velocity,
         outputs=[dense], name = 'encoder'
@@ -271,15 +266,15 @@ def get_encoder(embedding_size = 128,
             channels = channels,
             window_size = window_size,
             )
-        
+
 def get_ekyt_projection_head(embedding_size):
     projection_head = keras.Sequential(
             [
                 keras.Input(shape=(embedding_size,)),
-                layers.Dense(embedding_size, activation="relu"),
+                layers.Dense(embedding_size, activation='relu'),
                 layers.Dense(embedding_size),
             ],
-            name="projection_head",
+            name='projection_head',
         )
     return projection_head
 
@@ -287,10 +282,10 @@ def get_clrgaze_projection_head(embedding_size):
     projection_head = keras.Sequential(
             [
                 keras.Input(shape=(embedding_size,)),
-                layers.Dense(embedding_size, activation="relu"),
+                layers.Dense(embedding_size, activation='relu'),
                 layers.Dense(32),
             ],
-            name="projection_head",
+            name='projection_head',
         )
     return projection_head
 
@@ -311,17 +306,17 @@ class RotationLayer(tf.keras.layers.Layer):
         self.max_rotation = tf.convert_to_tensor(value=max_rotation)
         self.random_generator = tf.random.Generator.from_seed(seed)
         self.sampling_rate = sampling_rate
-    
-    def dva_vel(self,output):  
+
+    def dva_vel(self,output):
         out_vals = np.zeros(output.shape)
         N = out_vals.shape[1]
         # convert to velocities
         out_vals[:,1:N,:] = output[:,1:N,:] - output[:,0:N-1,:]
         return out_vals
-    
-    def call(self, inputs):        
+
+    def call(self, inputs):
         point = tf.expand_dims(inputs, axis=-1)
-        
+
         rand_value = self.random_generator.uniform([])
         cur_rot = tf.multiply(rand_value,self.max_rotation)
         sin_val = tf.convert_to_tensor(tf.math.sin(cur_rot))
@@ -329,26 +324,26 @@ class RotationLayer(tf.keras.layers.Layer):
         #print(sin_val)
         #print(cos_val)
         #print(inputs)
-        
+
         '''
         rotation_matrix = tf.constant([[np.cos(cur_rot),-np.sin(cur_rot)],
                                     [np.sin(cur_rot),np.cos(cur_rot)]])
         '''
-        
-        
+
+
         rotation_matrix = tf.convert_to_tensor([[cos_val,-sin_val],
                                     [sin_val,cos_val]])
-        
+
         #print(rotation_matrix)
         rotated_point = tf.matmul(rotation_matrix, point)
         #print(rotated_point)
-        
-       
+
+
         out_points = tf.squeeze(rotated_point, axis=-1)
         out_vals = tf.py_function(self.dva_vel,[out_points],tf.float32)
-        
+
         return tf.convert_to_tensor(value = out_vals)
-        
+
 def get_augmenter(name,**params):
     if name == 'crop':
         return get_crop_augmenter(params)
@@ -356,16 +351,16 @@ def get_augmenter(name,**params):
         return get_random_augmenter(params)
     elif name == 'rotation':
         return get_rotation_augmenter(params)
-       
+
 # augmentation module for rotation
 def get_rotation_augmenter(params):
     max_rotation = params['max_rotation']
     window_size = params['window_size']
     channels = params['channels']
-                                        
-    inputs = layers.Input(shape=(window_size, channels))    
+
+    inputs = layers.Input(shape=(window_size, channels))
     output = RotationLayer(max_rotation = max_rotation)(inputs)
-    
+
     return Model(inputs=inputs,
         outputs=[output],
         name = 'augmenter')
@@ -377,34 +372,34 @@ def get_crop_augmenter(params):
     window_size = params['window_size']
     overall_size = params['overall_size']
     channels = params['channels']
-    
+
     # expand dimensions to use image random crops
     # reduce dims to end up with sequence data
     inputs = layers.Input(shape=(overall_size, channels))
     output = layers.Reshape((overall_size,1, channels))(inputs)
     output = layers.RandomCrop(window_size,1)(output)
     output = layers.Reshape((window_size,2))(output)
-    
+
     return Model(inputs=inputs,
         outputs=[output],
         name = 'augmenter')
-        
+
 # augmentation module for cropping
 def get_random_augmenter(params):
     sd = params['sd']
     window_size = params['window_size']
     channels = params['channels']
-    
+
     # expand dimensions to use image random crops
     # reduce dims to end up with sequence data
-    inputs = layers.Input(shape=(window_size, channels))    
+    inputs = layers.Input(shape=(window_size, channels))
     output = layers.GaussianNoise(sd, seed=None)(inputs)
-        
+
     return Model(inputs=inputs,
         outputs=[output],
         name = 'augmenter')
-        
-        
+
+
 # Define the contrastive model with model-subclassing
 class ContrastiveModel(keras.Model):
     def __init__(self,
@@ -424,27 +419,27 @@ class ContrastiveModel(keras.Model):
                                 window_size = window_size,
                                 model_name = encoder_name)
         self.encoder_name = encoder_name
-        
+
         # Non-linear MLP as projection head
         self.projection_head = get_projection_head(embedding_size = embedding_size,
                                                     model_name = encoder_name)
-                                                    
-    
+
+
     def set_augmenter(self,contrastive_augmentation):
         self.contrastive_augmenter = get_augmenter(**contrastive_augmentation)
-        
-    
+
+
     def compile(self, contrastive_optimizer, **kwargs):
         super().compile(**kwargs)
 
         self.contrastive_optimizer = contrastive_optimizer
 
-        
-        self.contrastive_loss_tracker = keras.metrics.Mean(name="c_loss")
+
+        self.contrastive_loss_tracker = keras.metrics.Mean(name='c_loss')
         self.contrastive_accuracy = keras.metrics.SparseCategoricalAccuracy(
-            name="c_acc"
+            name='c_acc'
         )
-        
+
     @property
     def metrics(self):
         return [
@@ -508,13 +503,13 @@ class ContrastiveModel(keras.Model):
         self.contrastive_loss_tracker.update_state(contrastive_loss)
 
         return {m.name: m.result() for m in self.metrics}
-        
+
     def save_encoder_weights(self, path):
         self.encoder.save_weights(path)
-        
+
     def load_encoder_weights(self, path):
         self.encoder.load_weights(path)
-    
+
 
 def prepare_prtrain_dataset_from_array(unlabeled_train_data,
                               batch_size = 128):
@@ -523,9 +518,9 @@ def prepare_prtrain_dataset_from_array(unlabeled_train_data,
     unlabeled_dataset_size = unlabeled_train_data.shape[0]
     steps_per_epoch = (unlabeled_dataset_size) // batch_size
     unlabeled_batch_size = unlabeled_dataset_size // steps_per_epoch
-    
+
     print(
-        f"batch size is {unlabeled_batch_size} (unlabeled)"
+        f'batch size is {unlabeled_batch_size} (unlabeled)'
     )
 
     unlabeled_train_dataset =(tf.data.Dataset.from_tensor_slices((unlabeled_train_data,
@@ -538,7 +533,7 @@ def prepare_prtrain_dataset_from_array(unlabeled_train_data,
     return unlabeled_train_dataset
 
 
-def prepare_dataset_from_array(unlabeled_train_data, 
+def prepare_dataset_from_array(unlabeled_train_data,
                               labeled_train_data, labelded_train_label,
                               labeled_test_data, labeled_test_label,
                               batch_size = 128):
@@ -549,9 +544,9 @@ def prepare_dataset_from_array(unlabeled_train_data,
     steps_per_epoch = (unlabeled_dataset_size + labeled_dataset_size) // batch_size
     unlabeled_batch_size = unlabeled_dataset_size // steps_per_epoch
     labeled_batch_size = labeled_dataset_size // steps_per_epoch
-    
+
     print(
-        f"batch size is {unlabeled_batch_size} (unlabeled) + {labeled_batch_size} (labeled)"
+        f'batch size is {unlabeled_batch_size} (unlabeled) + {labeled_batch_size} (labeled)'
     )
 
     unlabeled_train_dataset =(tf.data.Dataset.from_tensor_slices((unlabeled_train_data,
@@ -559,13 +554,13 @@ def prepare_dataset_from_array(unlabeled_train_data,
                                 .shuffle(buffer_size=10 * unlabeled_batch_size)
                                 .batch(unlabeled_batch_size)#
                              )
-    
+
     labeled_train_dataset = (tf.data.Dataset.from_tensor_slices((labeled_train_data,
                              labelded_train_label))
                                 .shuffle(buffer_size=10 * unlabeled_batch_size)
                                 .batch(unlabeled_batch_size)
                             )
-    
+
     test_dataset = (tf.data.Dataset.from_tensor_slices((labeled_test_data,
                              labeled_test_label))
                             .batch(batch_size)
