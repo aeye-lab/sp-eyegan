@@ -2,7 +2,8 @@
  # for more information how to setup
  # see: https://docs.github.com/en/authentication/connecting-to-github-with-ssh/adding-a-new-ssh-key-to-your-github-account
 
-#!/usr/bin/env -e bash
+#!/usr/bin/env bash
+set -euxo pipefail
  echo 'Installing python requirements...'
  if !(pip install -r requirements.txt);
  then
