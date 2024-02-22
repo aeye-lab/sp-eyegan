@@ -10,8 +10,8 @@ import numpy as np
 import pandas as pd
 import seaborn as sns
 import tensorflow as tf
-from pymovements.gaze.transforms import pix2deg
-from pymovements.gaze.transforms import pos2vel
+from pymovements.gaze.transforms_numpy import pix2deg
+from pymovements.gaze.transforms_numpy import pos2vel
 from scipy import interpolate
 from scipy.spatial import distance
 from scipy.stats import ttest_1samp
@@ -36,6 +36,9 @@ from sp_eyegan.gpu_selection import select_gpu
 from sp_eyegan.model import contrastive_learner as contrastive_learner
 from sp_eyegan.preprocessing import data_loader as data_loader
 
+
+from sp_eyegan.model.helpers import helpers
+from sp_eyegan.model.preprocessing import feature_extraction as feature_extraction
 
 def cut_data(data,
                     max_vel = 0.5,
@@ -146,7 +149,35 @@ def get_model(args: argparse.Namespace) -> Model:
         classification_model.summary()
     return classification_model
 
-
+def create_rf_data(pixel_data):    
+    verbose = 0
+    for i in tqdm(np.arange(pixel_data.shape[0])):
+        cur_data = pd.DataFrame({'x_pixel':pixel_data[i,:,0],
+                                 'y_pixel':pixel_data[i,:,1],
+                                 #'eye_closure':np.zeros([len(train_data[i,:,0]),]),
+                                 #'blink':np.zeros([len(train_data[i,:,0]),]),
+                                 'corrupt':np.zeros([len(pixel_data[i,:,0]),]),
+                                 #'pupil':np.zeros([len(train_data[i,:,0]),]),
+                                 })
+        columns = ['x_pixel','y_pixel','corrupt']#,'eye_closure','blink','corrupt','pupil']
+        channels = {columns[i]:i for i in range(len(columns))}
+        data = np.array(cur_data, dtype=np.float32)
+        data = np.expand_dims(data, axis=0)
+        rf_features, feature_names = feature_extraction.compute_combined_features(
+                            data=data, data_format=channels,
+                            verbose=verbose,
+                            screenPX_x=1280,
+                            screenPX_y=1024,
+                            screenCM_x=38,
+                            screenCM_y=30,
+                            distanceCM=57,
+        )
+        if i == 0:
+            rf_data = rf_features
+        else:
+            rf_data = np.concatenate([rf_data, rf_features], axis=0)
+    rf_data[np.isnan(rf_data)] = 0.0
+    return rf_data
 
 def get_argument_parser() -> argparse.Namespace:
     # params
@@ -269,7 +300,7 @@ def main() -> int:
         if args.encoder_name == 'clrgaze':
             args.embedding_size = 512
         elif args.encoder_name == 'ekyt':
-            args.embedding_size = 128
+            args.embedding_size = 128        
 
     if args.pretrain_model_path is not None:
         args.pretrained_model_name = args.pretrain_model_path.split('/')[-1]
@@ -278,6 +309,8 @@ def main() -> int:
             args.pretrained_model_name = 'CLRGAZE'
         elif args.encoder_name == 'ekyt':
             args.pretrained_model_name = 'EKYT'
+        elif args.encoder_name == 'rf':
+                args.pretrained_model_name = 'RF'
 
     result_save_path = result_dir + str(args.pretrained_model_name) + '_adhd.joblib'
 
@@ -348,25 +381,35 @@ def main() -> int:
         X = np.array(load_px(cur_file), dtype=np.float32)
         _coord_fix_arr = X[:,[2,3]]
 
-        deg_fix_arr = pix2deg(
-            _coord_fix_arr,
-            screen_px=(800, 600),
-            screen_cm=(33.8, 27.0),
-            distance_cm=63.5,
-            origin='center',
-        )
+        if encoder_name != 'rf':
+            deg_fix_arr = pix2deg(
+                _coord_fix_arr,
+                screen_px=(800, 600),
+                screen_cm=(33.8, 27.0),
+                distance_cm=63.5,
+                origin='center',
+            )
 
-        vel_fix_arr = pos2vel(deg_fix_arr, sampling_rate=sampling_rate)
-        # convert deg/s to deg/ms
-        vel_fix_arr = vel_fix_arr / 1000.
+            vel_fix_arr = pos2vel(deg_fix_arr, sampling_rate=sampling_rate)
+            # convert deg/s to deg/ms
+            vel_fix_arr = vel_fix_arr / 1000.
 
-        tmp_data = cut_data(pd.DataFrame({'xvel':vel_fix_arr[:,0],
-                           'yvel':vel_fix_arr[:,1],
-                          }),
-                        max_vel = 0.5,
-                        window = window_size,
-                        verbose = 0,
-                        )
+            tmp_data = cut_data(pd.DataFrame({'xvel':vel_fix_arr[:,0],
+                               'yvel':vel_fix_arr[:,1],
+                              }),
+                            max_vel = 0.5,
+                            window = window_size,
+                            verbose = 0,
+                            )
+        else:
+            tmp_data = cut_data(pd.DataFrame({'xvel':_coord_fix_arr[:,0],
+                                       'yvel':_coord_fix_arr[:,1],
+                                      }),
+                                    max_vel = 1000000000000.,
+                                    window = window_size,
+                                    verbose = 0,
+                                    )
+
 
         cur_len = tmp_data.shape[0]
         while counter + cur_len > gaze_seq_data.shape[0]:
@@ -384,157 +427,224 @@ def main() -> int:
     gaze_seq_data = gaze_seq_data[0:counter]
     adhd_label = adhd_label[0:counter]
     subject_label = subject_label[0:counter]
-
+    
+    if encoder_name == 'rf':
+        gaze_seq_data = create_rf_data(gaze_seq_data)
+    
     unique_subjects = list(np.unique(subject_label))
     print('number of subjects: ' + str(len(unique_subjects)))
+    
+    if encoder_name != 'rf':
+        auc_rounds_rf = []
+        auc_rounds_nn = []
+        fold_counter = 1
+        for i in tqdm(np.arange(args.n_rounds), disable = False):
+            fold_idx=1
+            aucs_rf = []
+            aucs_nn = []
 
-    auc_rounds_rf = []
-    auc_rounds_nn = []
-    fold_counter = 1
-    for i in tqdm(np.arange(args.n_rounds), disable = False):
-        fold_idx=1
-        aucs_rf = []
-        aucs_nn = []
+            unique_user = np.array(list(np.unique(subject_label)))
+            unique_user_label = []
+            for u_u in range(len(unique_user)):
+                unique_user_label.append(user_label_mapping[u_u])
+            skf = StratifiedKFold(n_splits=args.n_folds, shuffle=True, random_state=i)
+            for train_idx, test_idx in tqdm(skf.split(unique_user, unique_user_label), disable = False):
+                train_user = unique_user[train_idx]
+                test_user  = unique_user[test_idx]
+                train_ids  = np.where(np.isin(np.array(subject_label), train_user))[0]
+                test_ids   = np.where(np.isin(np.array(subject_label), test_user))[0]
+                print('number train instances: ' + str(len(train_ids)))
+                print('number test instances: ' + str(len(test_ids)))
 
-        unique_user = np.array(list(np.unique(subject_label)))
-        unique_user_label = []
-        for u_u in range(len(unique_user)):
-            unique_user_label.append(user_label_mapping[u_u])
-        skf = StratifiedKFold(n_splits=args.n_folds, shuffle=True, random_state=i)
-        for train_idx, test_idx in tqdm(skf.split(unique_user, unique_user_label), disable = False):
-            train_user = unique_user[train_idx]
-            test_user  = unique_user[test_idx]
-            train_ids  = np.where(np.isin(np.array(subject_label), train_user))[0]
-            test_ids   = np.where(np.isin(np.array(subject_label), test_user))[0]
-            print('number train instances: ' + str(len(train_ids)))
-            print('number test instances: ' + str(len(test_ids)))
-
-            train_subjects = np.array(subject_label)[train_ids]
-            test_subjects  = np.array(subject_label)[test_ids]
-            train_label    = np.array(adhd_label)[train_ids]
-            test_label     = np.array(adhd_label)[test_ids]
-            train_data     = gaze_seq_data[train_ids]
-            test_data      = gaze_seq_data[test_ids]
-
-
-            #print(np.unique(train_label, return_counts = True))
-            #print(np.unique(test_label, return_counts = True))
-
-            # use specified amount ouf training instances
-            if args.num_train != -1:
-                rand_ids = np.random.permutation(np.arange(len(train_label)))
-                use_ids  = rand_ids[0:args.num_train]
-                train_subjects = train_subjects[use_ids]
-                train_trials = train_trials[use_ids]
-                train_label = train_label[use_ids]
-                train_data = train_data[use_ids]
-
-            # create training data
-            orig_data = train_data
-            orig_sub  = np.array(train_subjects, dtype=np.int32)
+                train_subjects = np.array(subject_label)[train_ids]
+                test_subjects  = np.array(subject_label)[test_ids]
+                train_label    = np.array(adhd_label)[train_ids]
+                test_label     = np.array(adhd_label)[test_ids]
+                train_data     = gaze_seq_data[train_ids]
+                test_data      = gaze_seq_data[test_ids]
 
 
-            # get model and train model and predict
-            classification_model = get_model(args)
+                #print(np.unique(train_label, return_counts = True))
+                #print(np.unique(test_label, return_counts = True))
 
-            # get feature extractions
-            embedding_model = Model(
-                inputs=classification_model.input,
-                outputs=classification_model.get_layer('dense').output,
-            )
+                # use specified amount ouf training instances
+                if args.num_train != -1:
+                    rand_ids = np.random.permutation(np.arange(len(train_label)))
+                    use_ids  = rand_ids[0:args.num_train]
+                    train_subjects = train_subjects[use_ids]
+                    train_trials = train_trials[use_ids]
+                    train_label = train_label[use_ids]
+                    train_data = train_data[use_ids]
 
-            test_embedding = embedding_model.predict(
-                test_data,
-                batch_size=args.batch_size,
-                verbose = 0,
-            )
-
-            train_embedding = embedding_model.predict(
-                train_data,
-                batch_size=args.batch_size,
-                verbose = 0,
-            )
-
-            # distance (zero-shot)
-            print('evaluate zero-shot (distance based)')
-            pos_train_ids = np.where(train_label == 1)[0]
-            pos_mean = np.mean(train_embedding[pos_train_ids], axis=0)
-
-            predictions_distances = distance.cdist(
-                test_embedding,
-                np.reshape(pos_mean, [1,len(pos_mean)]), metric='cosine',
-            )
-
-            # rf with features
-            print('evaluate RF on features')
-            grid_search_verbosity = 0
-
-            # rf
-            rf = GridSearchCV(estimator=RandomForestClassifier(), param_grid=param_grid, verbose = grid_search_verbosity, cv = args.inner_cv_loops)
-            rf.fit(train_embedding, train_label.ravel())
-
-            best_parameters = rf.best_params_
-            predictions_rf = rf.predict_proba(test_embedding)
+                # create training data
+                orig_data = train_data
+                orig_sub  = np.array(train_subjects, dtype=np.int32)
 
 
-            # NN
-            print('fine-tuning on features')
-            optimizer = Adam(learning_rate=args.learning_rate)
-            classification_model.compile(
-                optimizer=optimizer,
-                loss='binary_crossentropy',
-                metrics=['accuracy', auroc],
-            )
-            callbacks = [
-                EarlyStopping(
-                    monitor='val_loss', patience=5, restore_best_weights=True,
-                ),
-            ]
+                # get model and train model and predict
+                classification_model = get_model(args)
+
+                # get feature extractions
+                embedding_model = Model(
+                    inputs=classification_model.input,
+                    outputs=classification_model.get_layer('dense').output,
+                )
+
+                test_embedding = embedding_model.predict(
+                    test_data,
+                    batch_size=args.batch_size,
+                    verbose = 0,
+                )
+
+                train_embedding = embedding_model.predict(
+                    train_data,
+                    batch_size=args.batch_size,
+                    verbose = 0,
+                )
+
+                # distance (zero-shot)
+                print('evaluate zero-shot (distance based)')
+                pos_train_ids = np.where(train_label == 1)[0]
+                pos_mean = np.mean(train_embedding[pos_train_ids], axis=0)
+
+                predictions_distances = distance.cdist(
+                    test_embedding,
+                    np.reshape(pos_mean, [1,len(pos_mean)]), metric='cosine',
+                )
+
+                # rf with features
+                print('evaluate RF on features')
+                grid_search_verbosity = 0
+
+                # rf
+                rf = GridSearchCV(estimator=RandomForestClassifier(), param_grid=param_grid, verbose = grid_search_verbosity, cv = args.inner_cv_loops)
+                rf.fit(train_embedding, train_label.ravel())
+
+                best_parameters = rf.best_params_
+                predictions_rf = rf.predict_proba(test_embedding)
 
 
-            history = classification_model.fit(
-                train_data,
-                train_label,
-                validation_split=.2,
-                epochs=args.num_epochs,
-                callbacks=callbacks,
-                verbose=0,
-                batch_size=args.batch_size,
-            )
+                # NN
+                print('fine-tuning on features')
+                optimizer = Adam(learning_rate=args.learning_rate)
+                classification_model.compile(
+                    optimizer=optimizer,
+                    loss='binary_crossentropy',
+                    metrics=['accuracy', auroc],
+                )
+                callbacks = [
+                    EarlyStopping(
+                        monitor='val_loss', patience=5, restore_best_weights=True,
+                    ),
+                ]
 
-            predictions_nn = classification_model.predict(test_data)
 
-            u_subjects = list(np.unique(test_subjects))
-            #print('number of test subjects: ' + str(len(unique_subjects)))
-            u_label = []
-            u_preds_rf = []
-            u_preds_nn = []
-            for u_s in range(len(u_subjects)):
-                cur_subject = u_subjects[u_s]
-                cur_instances = np.where(test_subjects == cur_subject)[0]
-                cur_scores_rf = predictions_rf[cur_instances,1]
-                cur_scores_nn = predictions_nn[cur_instances]
-                cur_label = test_label[cur_instances]
-                u_label.append(int(np.unique(cur_label)))
-                u_preds_rf.append(np.mean(cur_scores_rf))
-                u_preds_nn.append(np.mean(cur_scores_nn))
+                history = classification_model.fit(
+                    train_data,
+                    train_label,
+                    validation_split=.2,
+                    epochs=args.num_epochs,
+                    callbacks=callbacks,
+                    verbose=0,
+                    batch_size=args.batch_size,
+                )
 
-            subj_auc_rf = roc_auc_score(u_label, u_preds_rf)
-            subj_auc_nn = roc_auc_score(u_label, u_preds_nn)
+                predictions_nn = classification_model.predict(test_data)
 
-            print(subj_auc_rf)
-            print(subj_auc_nn)
-            aucs_rf.append(subj_auc_rf)
-            aucs_nn.append(subj_auc_nn)
-            fold_idx +=1
-            fold_counter +=1
-        auc_rounds_rf.append(aucs_rf)
-        auc_rounds_nn.append(aucs_nn)
+                u_subjects = list(np.unique(test_subjects))
+                #print('number of test subjects: ' + str(len(unique_subjects)))
+                u_label = []
+                u_preds_rf = []
+                u_preds_nn = []
+                for u_s in range(len(u_subjects)):
+                    cur_subject = u_subjects[u_s]
+                    cur_instances = np.where(test_subjects == cur_subject)[0]
+                    cur_scores_rf = predictions_rf[cur_instances,1]
+                    cur_scores_nn = predictions_nn[cur_instances]
+                    cur_label = test_label[cur_instances]
+                    u_label.append(int(np.unique(cur_label)))
+                    u_preds_rf.append(np.mean(cur_scores_rf))
+                    u_preds_nn.append(np.mean(cur_scores_nn))
 
-    # save to file
-    joblib.dump({'auc_rounds_rf':auc_rounds_rf,
-                 'auc_rounds_nn':auc_rounds_nn,
-                 }, result_save_path, compress=3, protocol=2)
+                subj_auc_rf = roc_auc_score(u_label, u_preds_rf)
+                subj_auc_nn = roc_auc_score(u_label, u_preds_nn)
+
+                print(subj_auc_rf)
+                print(subj_auc_nn)
+                aucs_rf.append(subj_auc_rf)
+                aucs_nn.append(subj_auc_nn)
+                fold_idx +=1
+                fold_counter +=1
+            auc_rounds_rf.append(aucs_rf)
+            auc_rounds_nn.append(aucs_nn)
+
+        # save to file
+        joblib.dump({'auc_rounds_rf':auc_rounds_rf,
+                     'auc_rounds_nn':auc_rounds_nn,
+                     }, result_save_path, compress=3, protocol=2)
+    else:
+        auc_rounds_rf = []
+        fold_counter = 1
+        for i in tqdm(np.arange(args.n_rounds), disable = False):
+            fold_idx=1
+            aucs_rf = []
+
+            unique_user = np.array(list(np.unique(subject_label)))
+            unique_user_label = []
+            for u_u in range(len(unique_user)):
+                unique_user_label.append(user_label_mapping[u_u])
+            skf = StratifiedKFold(n_splits=args.n_folds, shuffle=True, random_state=i)
+            for train_idx, test_idx in tqdm(skf.split(unique_user, unique_user_label), disable = False):
+                train_user = unique_user[train_idx]
+                test_user  = unique_user[test_idx]
+                train_ids  = np.where(np.isin(np.array(subject_label), train_user))[0]
+                test_ids   = np.where(np.isin(np.array(subject_label), test_user))[0]
+                print('number train instances: ' + str(len(train_ids)))
+                print('number test instances: ' + str(len(test_ids)))
+
+                train_subjects = np.array(subject_label)[train_ids]
+                test_subjects  = np.array(subject_label)[test_ids]
+                train_label    = np.array(adhd_label)[train_ids]
+                test_label     = np.array(adhd_label)[test_ids]
+                train_data     = gaze_seq_data[train_ids]
+                test_data      = gaze_seq_data[test_ids]
+                
+                # transform data
+                print('evaluate RF on human-engeneered features')
+                grid_search_verbosity = 1
+
+                # rf
+                rf = GridSearchCV(estimator=RandomForestClassifier(), param_grid=param_grid, verbose = grid_search_verbosity, cv = args.inner_cv_loops)
+                rf.fit(train_data, train_label.ravel())
+
+                best_parameters = rf.best_params_
+                predictions_rf = rf.predict_proba(test_data)
+
+                u_subjects = list(np.unique(test_subjects))
+                #print('number of test subjects: ' + str(len(unique_subjects)))
+                u_label = []
+                u_preds_rf = []
+                for u_s in range(len(u_subjects)):
+                    cur_subject = u_subjects[u_s]
+                    cur_instances = np.where(test_subjects == cur_subject)[0]
+                    cur_scores_rf = predictions_rf[cur_instances,1]
+                    cur_label = test_label[cur_instances]
+                    u_label.append(int(np.unique(cur_label)))
+                    u_preds_rf.append(np.mean(cur_scores_rf))
+
+                subj_auc_rf = roc_auc_score(u_label, u_preds_rf)
+
+                print(subj_auc_rf)
+                aucs_rf.append(subj_auc_rf)
+                fold_idx +=1
+                fold_counter +=1
+            auc_rounds_rf.append(aucs_rf)
+
+        # save to file
+        joblib.dump({'auc_rounds_rf':auc_rounds_rf,
+                     'auc_rounds_nn':None,
+                     }, result_save_path, compress=3, protocol=2)
+            
 
     return 0
 

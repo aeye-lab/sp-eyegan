@@ -272,6 +272,7 @@ class dataGenerator():
                         max_iter = 10,
                         fixation_durations = None,
                         saccade_durations = None,
+                        return_event_type = False,
                         ):
         # helper functions
         def vel_to_dva(vel_data, x_start = 0,
@@ -401,6 +402,8 @@ class dataGenerator():
         # set start to first fix location
         x_location = [x_fix_locations[0]]
         y_location = [y_fix_locations[0]]
+        if return_event_type:
+            event_type = [1]
         for i in tqdm(np.arange(len(x_fix_locations)-1),disable = True):
             x_target_location = x_fix_locations[i+1]
             y_target_location = y_fix_locations[i+1]
@@ -425,6 +428,8 @@ class dataGenerator():
             fix_dva = vel_to_dva(fix_data)
             x_location += list(fix_dva[:,0] + x_location[-1])
             y_location += list(fix_dva[:,1] + y_location[-1])
+            if return_event_type:
+                event_type += [1 for _ in range(len(list(fix_dva[:,1] + y_location[-1])))]
 
             # add saccade
             if saccade_durations is not None:
@@ -445,6 +450,8 @@ class dataGenerator():
                                           )
             x_location += list(x_locs_sac)
             y_location += list(y_locs_sac)
+            if return_event_type:
+                event_type += [0 for _ in range(len(y_locs_sac))]
             continue
 
             cur_x_distance = x_target_location - x_location[-1]
@@ -483,6 +490,8 @@ class dataGenerator():
 
                 x_location += list(rotated_points[:,0] + x_location[-1])
                 y_location += list(rotated_points[:,1] + y_location[-1])
+                if return_event_type:
+                    event_type += [0 for _ in range(len(list(rotated_points[:,1] + y_location[-1])))]
 
                 cur_x_distance = x_target_location - x_location[-1]
                 cur_y_distance = y_target_location - y_location[-1]
@@ -490,7 +499,35 @@ class dataGenerator():
                 counter += 1
                 if counter > max_iter:
                     break
-        return x_location, y_location
+        
+        # add last fixation
+        if fixation_durations is None:
+            # sample fixation
+            fix_duration = -1
+            while fix_duration <= 0:
+                fix_duration = int(np.random.normal(self.mean_fix_len,self.std_fix_len,(1)))
+        else:
+            fix_duration = fixation_durations[-1]
+
+        num_fix_samples = int(np.ceil(fix_duration / self.fix_window_size))
+
+
+        noise = tf.random.normal([num_fix_samples, self.random_size])
+        gen_fixations = np.array(self.fix_model.generator(noise, training=False),dtype=np.float32)
+        fix_data = np.reshape(gen_fixations,[gen_fixations.shape[0]*gen_fixations.shape[1],gen_fixations.shape[2]])
+        fix_data = fix_data[0:fix_duration]
+
+        # convert to dva
+        fix_dva = vel_to_dva(fix_data)
+        x_location += list(fix_dva[:,0] + x_location[-1])
+        y_location += list(fix_dva[:,1] + y_location[-1])
+        if return_event_type:
+            event_type += [1 for _ in range(len(list(fix_dva[:,1] + y_location[-1])))]
+        
+        if return_event_type:
+            return x_location, y_location, event_type
+        else:
+            return x_location, y_location
 
 
 

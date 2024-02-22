@@ -5,8 +5,8 @@ import os
 import numpy as np
 import polars as pl
 import tensorflow as tf
-from pymovements.gaze.transforms import pix2deg
-from pymovements.gaze.transforms import pos2vel
+from pymovements.gaze.transforms_numpy import pix2deg
+from pymovements.gaze.transforms_numpy import pos2vel
 from tqdm import tqdm
 
 import config
@@ -26,6 +26,7 @@ def get_samples(
         df: pl.DataFrame,
         label_df: pl.DataFrame,
         window_in_ms: int,
+        rf_features:bool = False,
         padding: bool = False,
 ) -> tuple[np.array, np.array]:
     arr = np.empty((0, window_in_ms, 3))
@@ -40,60 +41,93 @@ def get_samples(
             _window_id = 0
             # cut into windows
             while True:
-                try:
-                    tmp_df = tmp_book_df[_window_id*window_in_ms:(_window_id+1)*window_in_ms]
-                    tmp_fix_coord = tmp_df[['x_left', 'y_left']]
-                    tmp_fix = tmp_df[['x_left', 'y_left', 'screen_id']]
-                    _coord_fix_arr = tmp_fix_coord.to_numpy()
-
-                    # https://www.viewsonic.com/de/products/sheet/G90fB
-                    deg_fix_arr = pix2deg(
-                        _coord_fix_arr,
-                        screen_px=(1024, 768),
-                        screen_cm=(44.5, 42.4),
-                        distance_cm=70,
-                        origin='center',
-                    )
-                    vel_fix_arr = pos2vel(deg_fix_arr, sampling_rate=1000)
-                    tmp_fix_arr = tmp_fix.to_numpy()
-                    tmp_fix_arr[:, [0, 1]] = vel_fix_arr
-                    arr = np.vstack([arr, np.expand_dims(tmp_fix_arr, axis=0)])
-                    label_arr = np.vstack([label_arr, label_book_df.to_numpy()])
-                except ValueError:
-                    if not padding:
+                if rf_features:
+                    try:
+                        tmp_df = tmp_book_df[_window_id*window_in_ms:(_window_id+1)*window_in_ms]
+                        tmp_fix_coord = tmp_df[['x_left', 'y_left']]
+                        tmp_fix = tmp_df[['x_left', 'y_left', 'screen_id']]
+                        _coord_fix_arr = tmp_fix_coord.to_numpy()
+                        
+                        tmp_fix_arr = tmp_fix.to_numpy()
+                        tmp_fix_arr[:, [0, 1]] = _coord_fix_arr
+                        arr = np.vstack([arr, np.expand_dims(tmp_fix_arr, axis=0)])
+                        label_arr = np.vstack([label_arr, label_book_df.to_numpy()])
+                    except ValueError:
+                        if not padding:
+                            break
+                        tmp_df = tmp_book_df[_window_id*window_in_ms:(_window_id+1)*window_in_ms]
+                        tmp_fix_coord = tmp_df[['x_left', 'y_left']]
+                        tmp_fix = tmp_df[['x_left', 'y_left', 'screen_id']]
+                        _coord_fix_arr = tmp_fix_coord.to_numpy()
+                        
+                        tmp_fix_arr_pad = np.expand_dims(
+                            np.pad(
+                                _coord_fix_arr,
+                                ((0, window_in_ms - len(_coord_fix_arr)), (0, 0)),
+                            ), axis=0,
+                        )
+                        arr = np.vstack([arr, tmp_fix_arr_pad])
+                        label_arr = np.vstack([label_arr, label_book_df.to_numpy()])
                         break
-                    tmp_df = tmp_book_df[_window_id*window_in_ms:(_window_id+1)*window_in_ms]
-                    tmp_fix_coord = tmp_df[['x_left', 'y_left']]
-                    tmp_fix = tmp_df[['x_left', 'y_left', 'screen_id']]
-                    _coord_fix_arr = tmp_fix_coord.to_numpy()
+                    _window_id += 1
+                else:
+                    try:
+                        tmp_df = tmp_book_df[_window_id*window_in_ms:(_window_id+1)*window_in_ms]
+                        tmp_fix_coord = tmp_df[['x_left', 'y_left']]
+                        tmp_fix = tmp_df[['x_left', 'y_left', 'screen_id']]
+                        _coord_fix_arr = tmp_fix_coord.to_numpy()
+                        
+                        
+                        # https://www.viewsonic.com/de/products/sheet/G90fB
+                        deg_fix_arr = pix2deg(
+                            _coord_fix_arr,
+                            screen_px=(1024, 768),
+                            screen_cm=(44.5, 42.4),
+                            distance_cm=70,
+                            origin='center',
+                        )
+                        vel_fix_arr = pos2vel(deg_fix_arr, sampling_rate=1000)
+                        tmp_fix_arr = tmp_fix.to_numpy()
+                        tmp_fix_arr[:, [0, 1]] = vel_fix_arr
+                        arr = np.vstack([arr, np.expand_dims(tmp_fix_arr, axis=0)])
+                        label_arr = np.vstack([label_arr, label_book_df.to_numpy()])
+                    except ValueError:
+                        if not padding:
+                            break
+                        tmp_df = tmp_book_df[_window_id*window_in_ms:(_window_id+1)*window_in_ms]
+                        tmp_fix_coord = tmp_df[['x_left', 'y_left']]
+                        tmp_fix = tmp_df[['x_left', 'y_left', 'screen_id']]
+                        _coord_fix_arr = tmp_fix_coord.to_numpy()
 
-                    # https://www.viewsonic.com/de/products/sheet/G90fB
-                    deg_fix_arr = pix2deg(
-                        _coord_fix_arr,
-                        screen_px=(768, 1024),
-                        screen_cm=(42.4, 44.5),
-                        distance_cm=70,
-                        origin='center',
-                    )
-                    vel_fix_arr = pos2vel(deg_fix_arr, sampling_rate=1000)
-                    tmp_fix_arr = tmp_fix.to_numpy()
-                    tmp_fix_arr[:, [0, 1]] = vel_fix_arr
-                    tmp_fix_arr_pad = np.expand_dims(
-                        np.pad(
-                            tmp_fix_arr,
-                            ((0, window_in_ms - len(vel_fix_arr)), (0, 0)),
-                        ), axis=0,
-                    )
-                    arr = np.vstack([arr, tmp_fix_arr_pad])
-                    label_arr = np.vstack([label_arr, label_book_df.to_numpy()])
-                    break
-                _window_id += 1
+                        # https://www.viewsonic.com/de/products/sheet/G90fB
+                        deg_fix_arr = pix2deg(
+                            _coord_fix_arr,
+                            screen_px=(768, 1024),
+                            screen_cm=(42.4, 44.5),
+                            distance_cm=70,
+                            origin='center',
+                        )
+                        vel_fix_arr = pos2vel(deg_fix_arr, sampling_rate=1000)
+                        tmp_fix_arr = tmp_fix.to_numpy()
+                        tmp_fix_arr[:, [0, 1]] = vel_fix_arr
+                        tmp_fix_arr_pad = np.expand_dims(
+                            np.pad(
+                                tmp_fix_arr,
+                                ((0, window_in_ms - len(vel_fix_arr)), (0, 0)),
+                            ), axis=0,
+                        )
+                        arr = np.vstack([arr, tmp_fix_arr_pad])
+                        label_arr = np.vstack([label_arr, label_book_df.to_numpy()])
+                        break
+                    _window_id += 1
 
     return arr, label_arr
 
 
 def get_sb_sat_data(window_in_ms: int,
-                    verbose: int = 0) -> tuple[np.array, np.array, dict[str, int]]:
+                    verbose: int = 0,
+                    rf_features:bool = False,
+) -> tuple[np.array, np.array, dict[str, int]]:
     if verbose == 0:
         disable = True
     else:
@@ -115,7 +149,7 @@ def get_sb_sat_data(window_in_ms: int,
         subj = file_name.split('.')[0]
         reader_label_df = label_df.filter(pl.col('subj') == subj).select(label_list)
         em_df = pl.read_csv(os.path.join(csv_dir_path, file_name), separator='\t')
-        arr, tmp_label_arr = get_samples(em_df, reader_label_df, window_in_ms)
+        arr, tmp_label_arr = get_samples(em_df, reader_label_df, window_in_ms, rf_features)
         X_arr = np.vstack([X_arr, arr])
         label_arr = np.vstack([label_arr, tmp_label_arr])
 

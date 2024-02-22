@@ -36,6 +36,9 @@ from sp_eyegan.model import contrastive_learner as contrastive_learner
 from sp_eyegan.preprocessing import data_loader as data_loader
 
 
+from sp_eyegan.model.helpers import helpers
+from sp_eyegan.model.preprocessing import feature_extraction as feature_extraction
+
 def cut_data(data,
                     max_vel = 0.5,
                     window = 5000,
@@ -145,7 +148,35 @@ def get_model(args: argparse.Namespace) -> Model:
         classification_model.summary()
     return classification_model
 
-
+def create_rf_data(pixel_data):
+    verbose = 0
+    for i in tqdm(np.arange(pixel_data.shape[0])):
+        cur_data = pd.DataFrame({'x_pixel':pixel_data[i,:,0],
+                                 'y_pixel':pixel_data[i,:,1],
+                                 #'eye_closure':np.zeros([len(train_data[i,:,0]),]),
+                                 #'blink':np.zeros([len(train_data[i,:,0]),]),
+                                 'corrupt':np.zeros([len(pixel_data[i,:,0]),]),
+                                 #'pupil':np.zeros([len(train_data[i,:,0]),]),
+                                 })
+        columns = ['x_pixel','y_pixel','corrupt']#,'eye_closure','blink','corrupt','pupil']
+        channels = {columns[i]:i for i in range(len(columns))}
+        data = np.array(cur_data, dtype=np.float32)
+        data = np.expand_dims(data, axis=0)
+        rf_features, feature_names = feature_extraction.compute_combined_features(
+                            data=data, data_format=channels,
+                            verbose=verbose,
+                            screenPX_x=1280,
+                            screenPX_y=1024,
+                            screenCM_x=38,
+                            screenCM_y=30,
+                            distanceCM=57,
+        )
+        if i == 0:
+            rf_data = rf_features
+        else:
+            rf_data = np.concatenate([rf_data, rf_features], axis=0)
+    rf_data[np.isnan(rf_data)] = 0.0
+    return rf_data
 
 def get_argument_parser() -> argparse.Namespace:
     # params
@@ -277,6 +308,8 @@ def main() -> int:
                 args.pretrained_model_name = 'CLRGAZE'
             elif args.encoder_name == 'ekyt':
                 args.pretrained_model_name = 'EKYT'
+            elif args.encoder_name == 'rf':
+                args.pretrained_model_name = 'RF'
 
         result_save_path = result_dir + str(args.pretrained_model_name) + '_fold' + str(args.fold) + '_gender.joblib'
 
@@ -334,27 +367,36 @@ def main() -> int:
 
             tmp_fix_coord = cur_csv_data[[0, 1]]
             _coord_fix_arr = tmp_fix_coord.to_numpy()
+            
+            if encoder_name != 'rf':
+                # http://antoinecoutrot.magix.net/public/databases.html
+                deg_fix_arr = pix2deg(
+                    _coord_fix_arr,
+                    screen_px=(1280, 1024),
+                    screen_cm=(38, 30),
+                    distance_cm=57,
+                    origin='center',
+                )
 
-            # http://antoinecoutrot.magix.net/public/databases.html
-            deg_fix_arr = pix2deg(
-                _coord_fix_arr,
-                screen_px=(1280, 1024),
-                screen_cm=(38, 30),
-                distance_cm=57,
-                origin='center',
-            )
+                vel_fix_arr = pos2vel(deg_fix_arr, sampling_rate=sampling_rate)
+                # convert deg/s to deg/ms
+                vel_fix_arr = vel_fix_arr / 1000.
 
-            vel_fix_arr = pos2vel(deg_fix_arr, sampling_rate=sampling_rate)
-            # convert deg/s to deg/ms
-            vel_fix_arr = vel_fix_arr / 1000.
-
-            tmp_data = cut_data(pd.DataFrame({'xvel':vel_fix_arr[:,0],
-                               'yvel':vel_fix_arr[:,1],
-                              }),
-                            max_vel = 0.5,
-                            window = window_size,
-                            verbose = 0,
-                            )
+                tmp_data = cut_data(pd.DataFrame({'xvel':vel_fix_arr[:,0],
+                                   'yvel':vel_fix_arr[:,1],
+                                  }),
+                                max_vel = 0.5,
+                                window = window_size,
+                                verbose = 0,
+                                )
+            else:
+                tmp_data = cut_data(pd.DataFrame({'xvel':_coord_fix_arr[:,0],
+                                   'yvel':_coord_fix_arr[:,1],
+                                  }),
+                                max_vel = 1000000000000.,
+                                window = window_size,
+                                verbose = 0,
+                                )
 
             cur_len = tmp_data.shape[0]
             while counter + cur_len > gaze_seq_data.shape[0]:
@@ -423,93 +465,116 @@ def main() -> int:
         # create training data
         orig_data = train_data
         orig_sub  = np.array(train_subjects, dtype=np.int32)
+        
+        if encoder_name != 'rf':
+            # get model and train model and predict
+            classification_model = get_model(args)
 
-        # get model and train model and predict
-        classification_model = get_model(args)
+            # get feature extractions
+            embedding_model = Model(
+                inputs=classification_model.input,
+                outputs=classification_model.get_layer('dense').output,
+            )
 
-        # get feature extractions
-        embedding_model = Model(
-            inputs=classification_model.input,
-            outputs=classification_model.get_layer('dense').output,
-        )
+            test_embedding = embedding_model.predict(
+                test_data,
+                batch_size=args.batch_size,
+            )
 
-        test_embedding = embedding_model.predict(
-            test_data,
-            batch_size=args.batch_size,
-        )
+            train_embedding = embedding_model.predict(
+                train_data,
+                batch_size=args.batch_size,
+            )
 
-        train_embedding = embedding_model.predict(
-            train_data,
-            batch_size=args.batch_size,
-        )
+            # distance (zero-shot)
+            print('evaluate zero-shot (distance based)')
+            pos_train_ids = np.where(train_label == 1)[0]
+            pos_mean = np.mean(train_embedding[pos_train_ids], axis=0)
 
-        # distance (zero-shot)
-        print('evaluate zero-shot (distance based)')
-        pos_train_ids = np.where(train_label == 1)[0]
-        pos_mean = np.mean(train_embedding[pos_train_ids], axis=0)
+            predictions_distances = distance.cdist(
+                test_embedding,
+                np.reshape(pos_mean, [1,len(pos_mean)]), metric='cosine',
+            )
 
-        predictions_distances = distance.cdist(
-            test_embedding,
-            np.reshape(pos_mean, [1,len(pos_mean)]), metric='cosine',
-        )
+            # rf with features
+            print('evaluate RF on features')
+            grid_search_verbosity = 1
 
-        # rf with features
-        print('evaluate RF on features')
-        grid_search_verbosity = 1
+            # rf
+            rf = GridSearchCV(estimator=RandomForestClassifier(), param_grid=param_grid, verbose = grid_search_verbosity, cv = args.inner_cv_loops)
+            rf.fit(train_embedding, train_label.ravel())
 
-        # rf
-        rf = GridSearchCV(estimator=RandomForestClassifier(), param_grid=param_grid, verbose = grid_search_verbosity, cv = args.inner_cv_loops)
-        rf.fit(train_embedding, train_label.ravel())
-
-        best_parameters = rf.best_params_
-        predictions_rf = rf.predict_proba(test_embedding)
-
-
-        # NN
-        print('fine-tuning on features')
-        optimizer = Adam(learning_rate=args.learning_rate)
-        classification_model.compile(
-            optimizer=optimizer,
-            loss='binary_crossentropy',
-            metrics=['accuracy', auroc],
-        )
-        callbacks = [
-            EarlyStopping(
-                monitor='val_loss', patience=5, restore_best_weights=True,
-            ),
-        ]
+            best_parameters = rf.best_params_
+            predictions_rf = rf.predict_proba(test_embedding)
 
 
-        history = classification_model.fit(
-            train_data,
-            train_label,
-            validation_split=.2,
-            epochs=args.num_epochs,
-            callbacks=callbacks,
-            verbose=1,
-            batch_size=args.batch_size,
-        )
+            # NN
+            print('fine-tuning on features')
+            optimizer = Adam(learning_rate=args.learning_rate)
+            classification_model.compile(
+                optimizer=optimizer,
+                loss='binary_crossentropy',
+                metrics=['accuracy', auroc],
+            )
+            callbacks = [
+                EarlyStopping(
+                    monitor='val_loss', patience=5, restore_best_weights=True,
+                ),
+            ]
 
-        predictions_nn = classification_model.predict(test_data)
 
-        # save to file
-        joblib.dump({'test_subjects':test_subjects,
-                     'test_label':test_label,
-                     'test_trials':test_trials,
-                     'predictions_distances':predictions_distances,
-                     'predictions_rf':predictions_rf,
-                     'predictions_nn':predictions_nn,
-                     }, result_save_path, compress=3, protocol=2)
+            history = classification_model.fit(
+                train_data,
+                train_label,
+                validation_split=.2,
+                epochs=args.num_epochs,
+                callbacks=callbacks,
+                verbose=1,
+                batch_size=args.batch_size,
+            )
 
-        # save embeddings
-        joblib.dump({'test_subjects':test_subjects,
-                     'train_subjects':train_subjects,
-                     'test_label':test_label,
-                     'train_label':train_label,
-                     'test_trials':test_trials,
-                     'train_embedding':'train_embedding',
-                     'test_embedding':'test_embedding',
-                     }, embedding_save_path, compress=3, protocol=2)
+            predictions_nn = classification_model.predict(test_data)
+
+            # save to file
+            joblib.dump({'test_subjects':test_subjects,
+                         'test_label':test_label,
+                         'test_trials':test_trials,
+                         'predictions_distances':predictions_distances,
+                         'predictions_rf':predictions_rf,
+                         'predictions_nn':predictions_nn,
+                         }, result_save_path, compress=3, protocol=2)
+
+            # save embeddings
+            joblib.dump({'test_subjects':test_subjects,
+                         'train_subjects':train_subjects,
+                         'test_label':test_label,
+                         'train_label':train_label,
+                         'test_trials':test_trials,
+                         'train_embedding':'train_embedding',
+                         'test_embedding':'test_embedding',
+                         }, embedding_save_path, compress=3, protocol=2)
+        else:
+            # rf with features
+            print('evaluate RF on human-engeneered features')
+            train_data = create_rf_data(train_data)
+            test_data  = create_rf_data(test_data)
+            grid_search_verbosity = 1
+
+            # rf
+            rf = GridSearchCV(estimator=RandomForestClassifier(), param_grid=param_grid, verbose = grid_search_verbosity, cv = args.inner_cv_loops)
+            rf.fit(train_data, train_label.ravel())
+
+            best_parameters = rf.best_params_
+            predictions_rf = rf.predict_proba(test_data)
+            
+            # save to file
+            joblib.dump({'test_subjects':test_subjects,
+                         'test_label':test_label,
+                         'test_trials':test_trials,
+                         'predictions_distances':None,
+                         'predictions_rf':predictions_rf,
+                         'predictions_nn':None,
+                         }, result_save_path, compress=3, protocol=2)
 
     return 0
 
