@@ -27,13 +27,16 @@ If you do not to replicate all experiments, you can either choose to comment out
 
 ### Download data
 
-We use the [`pymovements`](https://github.com/aeye-lab/pymovements) package to download the data. For this either execute `scripts/get_data.sh` or it is also part of the `rerun_experiments.sh` script. Note, you have to download both `Gaze on Faces` and `SB-SAT` manually. We will try to fix this as soon as possible.
+We use the [`pymovements`](https://github.com/aeye-lab/pymovements) package to download the data. For this either execute `scripts/get_data.sh` or it is also part of the `rerun_experiments.sh` script.
 
 
-Alternatively, you can also download the original data from the sources listed below.
+Alternatively, you can also download the data from the sources listed below.
 
 Download the GazeBase data:
 * Download and extract the GazeBase data into a `data/GazeBase` to train FixGAN and SacGAN [figshare-link](https://figshare.com/articles/dataset/GazeBase_Data_Repository/12912257).
+
+Download the JuDo1000 data:
+* Download and extract the JuDo1000 data from this [osf-link](https://osf.io/5zpvk/).
 
 Download the SB-SAT data:
 * Download the SB-SAT data into a `data/SB-SAT` [osf-link](https://osf.io/cdx69/).
@@ -46,7 +49,7 @@ Clone the github repository to obtain the ADHD dataset into `data/ecml-ADHD`:
 * if you do not use the terminal / git bash / ide you can download the zip file at the top right of the [repository](https://github.com/aeye-lab/ecml-ADHD). After downloading the zip file, extract it to your local clone of this repositry.
 
 Download the Gaze on Faces dataset:
-* Download the [Gaze on Faces data](https://uncloud.univ-nantes.fr/index.php/s/8KW6dEdyBJqxpmo) into the `data/Gaze_on_Faces` folder where you cloned this repositry. Then extract the zip file `gaze_csv.zip`.
+* Download the [Gaze on Faces data](https://uncloud.univ-nantes.fr/index.php/s/8KW6dEdyBJqxpmo) into the `data/Gaze_on_Faces` folder where you cloned this repositry. Then extract the zip file `gaze_csv.zip` to `data/Gaze_on_Faces/`.
 
 ### Configure the paths
 Modify `config.py` to contain the path to the GazeBase, SB-SAT, HBN, and Gaze on Faces directories, where you want to store the models and classification results.
