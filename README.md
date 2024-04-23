@@ -1,7 +1,7 @@
 SP-EyeGAN: Generating Synthetic Eye Movement Data
 =================================================
 
-This repository provides the code for reproducing the experiments in [SP-EyeGAN: Generating Synthetic Eye Movement Data](https://dl.acm.org/doi/abs/10.1145/3588015.3588410) and [Improving Cognitive-State Analysis from Eye Gaze with Synthetic Eye-Movement Data](https://www.sciencedirect.com/science/article/pii/S0097849324000281). Additionally, you can also use the pre-trained models and create the synthetic data you need for your experiments.
+This repository provides the code for reproducing the experiments in SP-EyeGAN: Generating Synthetic Eye Movement Data. Additionally, you can also use the pre-trained models and create the synthetic data you need for your experiments.
 
 ![Method overview](images/sp-eyegan.png)
 
@@ -13,24 +13,18 @@ To reproduce all the tables and figures from the paper you can run the following
 
 ## Reproduce the experiments
 
-In the original experiments, we used [Python 3.9](https://www.python.org/).
+### Hardware and time requirements
+* RAM: 12 GB to store the training data to train FixGAN and SacGAN
+* GPU-RAM: 12 GB (we trained the models using a A100-SXM4-40GB
+* time to train SP-EyeGAN: approx 20 min to train FixGAN and 5 min to train SacGAN on a A100-SXM4-40GB
 
+### Get data for downstream task (ADHD)
 Clone the github repository to obtain the ADHD dataset:
 * Using git(hub)s CLI and ssh:
     * `git clone git@github.com:aeye-lab/sp-eyegan`
 * without ssh:
     * `git clone https://github.com/aeye-lab/sp-eyegan`
 * if you do not use the terminal / git bash / ide you can download the zip file at the top right of the [repository](https://github.com/aeye-lab/sp-eyegan). Extract the zip file after downloading it.
-
-### Setup conda environment
-You can install and setup conda using the this [tutorial](https://conda.io/projects/conda/en/latest/user-guide/getting-started.html).
-
-### Install dependencies
-To install all packages necessary to execute the code:
-
-```bash
-pip install -r requirements.txt
-```
 
 ### Rerun all experiments
 
@@ -40,6 +34,8 @@ rerun_experiments.sh
 ```
 
 If you do not to replicate all experiments, you can either choose to comment out certain parts of the `rerun_experiments.sh` or other bash scripts or follow the steps provided below. Depending on your hardware rerunning all experiments might take several days.
+
+
 
 ### Download data
 
