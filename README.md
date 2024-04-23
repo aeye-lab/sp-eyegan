@@ -5,6 +5,12 @@ This repository provides the code for reproducing the experiments in SP-EyeGAN: 
 
 ![Method overview](images/sp-eyegan.png)
 
+## Reproduce tables and figures from the paper
+To reproduce all the tables and figures from the paper you can run the following notebooks:
+* Run/inspect notebook [this notebook](reproduce_tables_2_3.ipynb) to reproduce Tables 2 and 3 comparing the quality of generated fixations and saccades.
+* Run/inspect notebook [this notebook](reproduce_figure_3.ipynb) to reproduce Figure 3 showing eye movements generated with SP-EyeGAN on a text.
+* Run/inspect notebook [this notebook](reproduce_downstream_tables_4_5_6_7_8_figure_5.ipynb) to reproduce Tables 4-8 and Figure 5 comparing methods on downstream tasks.
+
 ## Reproduce the experiments
 
 Clone the github repository to obtain the ADHD dataset:
