@@ -1,7 +1,7 @@
 SP-EyeGAN: Generating Synthetic Eye Movement Data
 =================================================
 
-This repository provides the code for reproducing the experiments in SP-EyeGAN: Generating Synthetic Eye Movement Data. Additionally, you can also use the pre-trained models and create the synthetic data you need for your experiments.
+This repository provides the code for reproducing the experiments in [SP-EyeGAN: Generating Synthetic Eye Movement Data](https://dl.acm.org/doi/abs/10.1145/3588015.3588410) and [Improving Cognitive-State Analysis from Eye Gaze with Synthetic Eye-Movement Data](https://www.sciencedirect.com/science/article/pii/S0097849324000281). Additionally, you can also use the pre-trained models and create the synthetic data you need for your experiments.
 
 ![Method overview](images/sp-eyegan.png)
 
@@ -13,18 +13,29 @@ To reproduce all the tables and figures from the paper you can run the following
 
 ## Reproduce the experiments
 
-### Hardware and time requirements
-* RAM: 12 GB to store the training data to train FixGAN and SacGAN
-* GPU-RAM: 12 GB (we trained the models using a A100-SXM4-40GB
-* time to train SP-EyeGAN: approx 20 min to train FixGAN and 5 min to train SacGAN on a A100-SXM4-40GB
+In the original experiments, we used [Python 3.9](https://www.python.org/).
 
-### Get data for downstream task (ADHD)
 Clone the github repository to obtain the ADHD dataset:
 * Using git(hub)s CLI and ssh:
     * `git clone git@github.com:aeye-lab/sp-eyegan`
 * without ssh:
     * `git clone https://github.com/aeye-lab/sp-eyegan`
 * if you do not use the terminal / git bash / ide you can download the zip file at the top right of the [repository](https://github.com/aeye-lab/sp-eyegan). Extract the zip file after downloading it.
+
+### Hardware and time requirements
+* RAM: 12 GB to store the training data to train FixGAN and SacGAN
+* GPU-RAM: 12 GB (we trained the models using a A100-SXM4-40GB
+* time to train SP-EyeGAN: approx 20 min to train FixGAN and 5 min to train SacGAN on a A100-SXM4-40GB
+
+### Setup conda environment
+You can install and setup conda using the this [tutorial](https://conda.io/projects/conda/en/latest/user-guide/getting-started.html).
+
+### Install dependencies
+To install all packages necessary to execute the code:
+
+```bash
+pip install -r requirements.txt
+```
 
 ### Rerun all experiments
 
@@ -34,8 +45,6 @@ rerun_experiments.sh
 ```
 
 If you do not to replicate all experiments, you can either choose to comment out certain parts of the `rerun_experiments.sh` or other bash scripts or follow the steps provided below. Depending on your hardware rerunning all experiments might take several days.
-
-
 
 ### Download data
 
@@ -96,11 +105,11 @@ Creating synthetic data for the other stimuli could be extracted by change the `
 #### 1. Pretrain the model with contrastive loss:
 In the following we will show how to pretrain two different models on several different sampling rates using [contrastive loss](sp_eyegan/pretrain_constastive_learning.py). The [rerun_experiments.sh](rerun_experiments.sh) will train for two models at 1000Hz. If you want to use your own architecture, you can add the architecture to [contrastive learning environment](sp_eyegan/model/contrastive_learner.py) and call it via `--encoder_name YOUR ARCHITECTURE NAME`. Note that `window_size` should be equal for both the synthetic data created and the pretraining script.
 * for training on 1,000 Hz (note, these examples assume you have access to at least 4 gpus -- if not adjust by not using -GPU NUMBER):
-	* pretrain model with contrastive loss with random augmentation on synthetic data and EKYT architecture:
+        * pretrain model with contrastive loss with random augmentation on synthetic data and EKYT architecture:
     ```bash
     python -m sp_eyegan.pretrain_constastive_learning --stimulus text -augmentation_mode random  -sd 0.1     -sd_factor 1.25 -encoder_name ekyt -GPU 0 --window_size 5000
     ```
-	* pretrain model with contrastive loss with random augmentation on synthetic data and CLRGaze architecture:
+        * pretrain model with contrastive loss with random augmentation on synthetic data and CLRGaze architecture:
     ```bash
     python -m sp_eyegan.pretrain_constastive_learning --stimulus text -augmentation_mode random  -sd 0.1     -sd_factor 1.25 -encoder_name clrgaze -GPU 0 --window_size 5000
     ```
@@ -172,4 +181,3 @@ If you are using SP-EyeGAN in your research, we would be happy if you cite our w
   publisher = {ACM},
   doi       = {10.1145/3588015.3588410],
 }
-```
