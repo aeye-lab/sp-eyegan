@@ -1,9 +1,8 @@
 if !(git clone https://github.com/aeye-lab/ecml-ADHD data/ecml-ADHD);
 then
     echo 'Failed to clone ADHD data, precise error see above'
-    exit 1
 fi
-for dataset in GazeBase JuDo100 GazeOnFaces SB-SAT
+for dataset in GazeBase JuDo1000 GazeOnFaces SBSAT
 do
     echo "Getting $dataset...."
     if  !(python -m sp_eyegan.get_data --dataset-name $dataset)
