@@ -213,6 +213,7 @@ def get_argument_parser() -> argparse.Namespace:
     parser.add_argument('--video', type=str, default='Video_Fractals')
     parser.add_argument('--save_suffix', type=str, default='')
     parser.add_argument('--fine_tune', type=int, default=1)
+    parser.add_argument('--batch_size', type=int, default=32)
 
     args = parser.parse_args()
     return args
@@ -331,7 +332,6 @@ def main() -> int:
     args.print_model_summary = False
     args.learning_rate = 0.0001
     args.num_epochs = 100
-    args.batch_size = 32
 
     # set up gpu
     configure_gpu(args)

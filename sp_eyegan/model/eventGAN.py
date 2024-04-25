@@ -63,7 +63,7 @@ class eventGAN():
                     ):
         tf.keras.backend.clear_session()
         input_generator = Input(
-                                shape=(model_config['random_size']), name='random_input',
+                                shape=(model_config['random_size'],), name='random_input',
                             )
 
         dense_1 = Dense(model_config['gen_kernel_sizes'][0] * model_config['gen_filter_sizes'][0], use_bias = False) (input_generator)

@@ -134,7 +134,10 @@ def get_sb_sat_data(window_in_ms: int,
         disable = False
 
     data_path = config.SB_SAT_DIR_PATH
-    csv_dir_path = os.path.join(data_path, 'csvs')
+    if os.path.exists(os.path.join(data_path, 'csvs')):
+        csv_dir_path = os.path.join(data_path, 'csvs')
+    else:
+        csv_dir_path = os.path.join(data_path, 'raw')
 
     label_df = pl.read_csv(os.path.join(data_path, 'labels.csv'))
     X_arr = np.empty((0, window_in_ms, 3))

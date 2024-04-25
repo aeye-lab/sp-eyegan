@@ -25,7 +25,6 @@ from sp_eyegan.load_sb_sat_data import get_sb_sat_data
 from sp_eyegan.model import contrastive_learner
 
 
-from sp_eyegan.model.helpers import helpers
 from sp_eyegan.model.preprocessing import feature_extraction as feature_extraction
 
 

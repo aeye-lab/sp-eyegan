@@ -39,7 +39,7 @@ def vel_to_dva(vel_data, x_start = 0,
 def main():
     # global
     parser = argparse.ArgumentParser()
-    parser.add_argument('-GPU','--GPU',type=int,default=3)
+    parser.add_argument('-GPU','--GPU',type=int,default=0)
     parser.add_argument('-temperature','--temperature',type=float,default=0.1)
     parser.add_argument('-sd','--sd',type=float,default=0.1)
     parser.add_argument('-sd_factor','--sd_factor',type=float,default=1.25)
@@ -137,8 +137,12 @@ def main():
         return 0
 
     print('pretrain config: ' + str(contrastive_augmentation))
+    
+    if GPU != -1:
+        flag_train_on_gpu = True
+    else:
+        flag_train_on_gpu = False
 
-    flag_train_on_gpu = True
     if flag_train_on_gpu:
         import tensorflow as tf
         # select graphic card

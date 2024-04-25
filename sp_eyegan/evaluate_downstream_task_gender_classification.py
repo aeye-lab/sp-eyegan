@@ -10,8 +10,8 @@ import numpy as np
 import pandas as pd
 import seaborn as sns
 import tensorflow as tf
-from pymovements.gaze.transforms import pix2deg
-from pymovements.gaze.transforms import pos2vel
+from pymovements.gaze.transforms_numpy import pix2deg
+from pymovements.gaze.transforms_numpy import pos2vel
 from scipy import interpolate
 from scipy.spatial import distance
 from scipy.stats import ttest_1samp
@@ -209,6 +209,7 @@ def get_argument_parser() -> argparse.Namespace:
     parser.add_argument('--inner_cv_loops', type=int, default=2)
     parser.add_argument('--save_suffix', type=str, default='')
     parser.add_argument('--fine_tune', type=int, default=1)
+    parser.add_argument('--batch_size', type=int, default=32)
 
     args = parser.parse_args()
     return args
@@ -331,7 +332,6 @@ def main() -> int:
         args.print_model_summary = True
         args.learning_rate = 0.0001
         args.num_epochs = 100
-        args.batch_size = 32
 
 
         # set up gpu

@@ -522,8 +522,11 @@ def prepare_prtrain_dataset_from_array(unlabeled_train_data,
     print(
         f'batch size is {unlabeled_batch_size} (unlabeled)'
     )
-
-    unlabeled_train_dataset =(tf.data.Dataset.from_tensor_slices((unlabeled_train_data,
+    
+    with tf.device('CPU'):
+        data_tensor = tf.convert_to_tensor(unlabeled_train_data)
+    
+    unlabeled_train_dataset =(tf.data.Dataset.from_tensor_slices((data_tensor,
                              tf.ones((unlabeled_dataset_size,1))))
                                 .shuffle(buffer_size=10 * unlabeled_batch_size)
                                 .batch(unlabeled_batch_size)

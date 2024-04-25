@@ -603,7 +603,7 @@ def configure_gpu(args: argparse.Namespace) -> None:
 def get_argument_parser() -> argparse.Namespace:
     # params
     parser = argparse.ArgumentParser()
-    parser.add_argument('--stimulus', type=str, default='TEX')
+    parser.add_argument('--stimulus', type=str, default=None)
     parser.add_argument('--dataset_name', type=str, default='gazebase')
     parser.add_argument('--encoder_name', type=str, default='ekyt')
 
@@ -750,24 +750,18 @@ def main() -> int:
         if dataset_name == 'gazebase':
             # load gazebase data
             dataset = pm.Dataset('GazeBase', path=config.GAZE_BASE_DIR)
+            subset = dict()
+            if subset is not None:
+                subset['task_name'] = stimulus
 
-            if max_rounds == -1:
-                subset = {
-                    #'subject_id': list(np.arange(100,dtype=np.int32)),
-                    'task_name': [stimulus],
-                }
-            else:
-                subset = {
-                    #'subject_id': list(np.arange(100,dtype=np.int32)),
-                    'task_name': [stimulus],
-                    'round_id': list(np.arange(1,max_rounds+1,1)),
-                }
+            if max_rounds != -1:
+                subset['round_id'] = list(np.arange(1,max_rounds+1,1))
 
             try:
-                dataset.load()
+                dataset.load(subset=subset)
             except:
                 dataset.download()
-                dataset.load()
+                dataset.load(subset=subset)
 
 
             num_pairs = len(dataset.gaze)
@@ -778,7 +772,12 @@ def main() -> int:
             session_ids = np.zeros([num_add,])
             gaze_seq_data = np.zeros([num_add,5000,2])
             for i in tqdm(np.arange(num_pairs)):
-                cur_data = dataset.gaze[i].frame
+                cur_data = dataset.gaze[i]
+                try:
+                    cur_data.unnest('position', output_columns=['x_left_pos', 'y_left_pos'])
+                except:
+                    pass
+                cur_data = cur_data.frame
                 cur_gazebase_data = cut_data(cur_data,
                                                     window=5000,
                                                     max_vel=.5,
@@ -858,8 +857,15 @@ def main() -> int:
             subject_ids = np.zeros([num_add,])
             session_ids = np.zeros([num_add,])
             gaze_seq_data = np.zeros([num_add,5000,2])
-            for i in tqdm(np.arange(num_pairs)):
-                cur_data = dataset.gaze[i].frame
+            for i in tqdm(np.arange(num_pairs)):                
+                cur_data = dataset.gaze[i]
+                try:
+                    cur_data.unnest('position', output_columns=['x_left_pos', 'y_left_pos',
+                                                                'x_right_pos', 'y_right_pos'])
+                except:
+                    pass
+                cur_data = cur_data.frame
+                
                 cur_cut_data = cut_data(cur_data,
                                                     window=5000,
                                                     max_vel=.5,
@@ -933,7 +939,7 @@ def main() -> int:
             #outputs=biometric_model.get_layer('a_final').output,
             outputs=biometric_model.get_layer('dense').output,
         )
-
+        
         embedding_zero_shot = embedding_model.predict(
             test_data,
             batch_size=batch_size,
@@ -947,7 +953,8 @@ def main() -> int:
         steps_per_val = int(len(validation_idx) / batch_size)
 
         history = biometric_model.fit(
-            generate_data(orig_data[train_idx, :],y_train[train_idx, :],
+            generate_data(orig_data[train_idx, :],
+                    y_train[train_idx, :],
                     batchsize = batch_size,
             ),
             validation_data=(
