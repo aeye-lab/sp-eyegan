@@ -335,15 +335,26 @@ def load_gazebase_data(gaze_base_dir = 'path_to_gazebase_data',
                             target_sampling_rate = 60,
                             sampling_rate = 1000
                             ):
-    gaze_base_raw_data_dirs = [gaze_base_dir + 'Round_9/',
-                    gaze_base_dir + 'Round_8/',
-                    gaze_base_dir + 'Round_7/',
-                    gaze_base_dir + 'Round_6/',
-                    gaze_base_dir + 'Round_5/',
-                    gaze_base_dir + 'Round_4/',
-                    gaze_base_dir + 'Round_3/',
-                    gaze_base_dir + 'Round_2/',
-                    gaze_base_dir + 'Round_1/']
+    if os.path.exists(gaze_base_dir + 'Round_9/'):
+        gaze_base_raw_data_dirs = [gaze_base_dir + 'Round_9/',
+                        gaze_base_dir + 'Round_8/',
+                        gaze_base_dir + 'Round_7/',
+                        gaze_base_dir + 'Round_6/',
+                        gaze_base_dir + 'Round_5/',
+                        gaze_base_dir + 'Round_4/',
+                        gaze_base_dir + 'Round_3/',
+                        gaze_base_dir + 'Round_2/',
+                        gaze_base_dir + 'Round_1/']
+    else:
+        gaze_base_raw_data_dirs = [gaze_base_dir + '/raw/Round_9/',
+                        gaze_base_dir + '/raw/Round_8/',
+                        gaze_base_dir + '/raw/Round_7/',
+                        gaze_base_dir + '/raw/Round_6/',
+                        gaze_base_dir + '/raw/Round_5/',
+                        gaze_base_dir + '/raw/Round_4/',
+                        gaze_base_dir + '/raw/Round_3/',
+                        gaze_base_dir + '/raw/Round_2/',
+                        gaze_base_dir + '/raw/Round_1/']
 
     csv_files = []
     for cur_dir in gaze_base_raw_data_dirs:

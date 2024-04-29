@@ -95,7 +95,6 @@ def main():
         sampling_rate=sampling_rate,
     )
 
-
     event_df_list = []
     list_dicts_list = []
     for i in tqdm(np.arange(len(gaze_data_list)),disable = disable):
