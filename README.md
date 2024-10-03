@@ -181,3 +181,18 @@ If you are using SP-EyeGAN in your research, we would be happy if you cite our w
   publisher = {ACM},
   doi       = {10.1145/3588015.3588410],
 }
+```
+
+```bibtex
+@article{Prasse_Improving2024,
+  title = {Improving cognitive-state analysis from eye gaze with synthetic eye-movement data},
+  journal = {Computers & Graphics},
+  volume = {119},
+  pages = {103901},
+  year = {2024},
+  issn = {0097-8493},
+  doi = {https://doi.org/10.1016/j.cag.2024.103901},
+  url = {https://www.sciencedirect.com/science/article/pii/S0097849324000281},
+  author = {Paul Prasse and David R. Reich and Silvia Makowski and Tobias Scheffer and Lena A. Jäger},
+}
+```
